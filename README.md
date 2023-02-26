@@ -230,6 +230,12 @@ OpenThread启动的时候，会默认设定创建线程的最大数量。超过�
 创建太多线程会带来性能损耗，最好线程数是CPU核数的2倍。尽量避免频繁创建和销毁线程。
 
 ```C++
+#include <assert.h>
+#include <iostream>
+#include <stdio.h>
+#include "openthread.h"
+using namespace open;
+
 void Test3Thread1(OpenThreadMsg& msg)
 {
 }
@@ -308,8 +314,12 @@ Timer提供定时器服务，启动时，向Inspector注册，并提供运行信
 Server向Inspector查询可用的Timer，然后向此Timer请求定时服务。
 ```C++
 #include <assert.h>
+#include <iostream>
 #include <stdio.h>
+#include <map>
+#include <unordered_map>
 #include "openthread.h"
+
 using namespace open;
 //假设是谷歌protobuff对象
 struct ProtoBuffer
@@ -772,7 +782,7 @@ public:
     }
 };
 
-void Test4()
+int main()
 {
 	//创建一个Inspector，2个Timer和2个Server
     std::vector<Worker*> vectWorker =
