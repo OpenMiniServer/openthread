@@ -819,7 +819,7 @@ void OpenThread::ThreadInstance::stop()
             while (sptr->isRunning())
             {
                 OpenThread::Sleep(count);
-                count *= 2;
+                count += 2;
                 if (count > 4)
                 {
                     if (sptr->isCurrent())

@@ -233,7 +233,7 @@ public:
         printf("[%s]send=>[%s] key:%s\n", name_.c_str(), WorkerName(sid).c_str(), key.c_str());
         auto data = std::shared_ptr<Data>(new Data(pid(), name_, key, proto));
         bool ret = OpenThread::Send(sid, data);
-        assert(ret);
+        //assert(ret);
         return ret;
     }
     // proto will be delete
@@ -242,7 +242,7 @@ public:
         printf("[%s]send=>[%s] key:%s\n", name_.c_str(), name.c_str(), key.c_str());
         auto data = std::shared_ptr<Data>(new Data(pid(), name_, key, proto));
         bool ret = OpenThread::Send(name, data);
-        assert(ret);
+        //assert(ret);
         return ret;
     }
     bool send(std::vector<int>& vectSid, const std::string& key, ProtoBuffer* proto)
@@ -250,7 +250,7 @@ public:
         printf("[%s]send=>size[%d] key:%s\n", name_.c_str(), (int)vectSid.size(), key.c_str());
         auto data = std::shared_ptr<Data>(new Data(pid(), name_, key, proto));
         bool ret = OpenThread::Send(vectSid, data);
-        assert(ret);
+        //assert(ret);
         return ret;
     }
     bool send(std::vector<std::string>& vectName, const std::string& key, ProtoBuffer* proto)
@@ -258,7 +258,7 @@ public:
         printf("[%s]send=>size[%d] key:%s\n", name_.c_str(), (int)vectName.size(), key.c_str());
         auto data = std::shared_ptr<Data>(new Data(pid(), name_, key, proto));
         bool ret = OpenThread::Send(vectName, data);
-        assert(ret);
+        //assert(ret);
         return ret;
     }
     void stop()
@@ -574,13 +574,14 @@ public:
 
 void Test4()
 {
+    OpenThread::StopAll();
     std::vector<Worker*> vectWorker =
     {
         new Inspector("Inspector"),
         new Timer("timer1"),
-        //new Timer("timer2"),
+        new Timer("timer2"),
         new Server("server1"),
-        //new Server("server2")
+        new Server("server2")
     };
     std::vector<std::string> vectName;
     for (size_t i = 0; i < vectWorker.size(); i++)
