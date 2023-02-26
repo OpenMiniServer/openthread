@@ -1,0 +1,11 @@
+
+CMAKE_MINIMUM_REQUIRED(VERSION 3.12.1)
+PROJECT(openthread)
+
+include_directories(src)
+
+add_executable(test 
+	src/openthread.h 
+	src/openthread.cpp 
+	test/main.cpp
+)
