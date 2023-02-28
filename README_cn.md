@@ -1,74 +1,69 @@
 # OpenThread
-OpenThread is the world’s most comfortable cross-platform multi-threaded concurrent library. 
+OpenThread是世界上最舒心的跨平台多线程并发库。
+使用优雅的方式，创建线程、管理线程和线程间通信，从而实现多核并发。
+OpenThread无任何依赖，全平台设计，只有两个源文件，让小白都可以轻松玩转C++多线程开发。
+OpenLinyou系列项目：https://github.com/openlinyou
 
-Using elegant methods to create threads, manage threads and communicate between threads to achieve multi-core concurrency. 
+## 跨平台支持
+Windows、linux等跨平台设计
 
-OpenThread has no dependencies and is designed for all platforms with only two source files, making it easy for beginners to play with C++ multi-threading development. 
-
-OpenLinyou series project: https://github.com/openlinyou
-
-## Cross-platform support 
-Designed for cross-platforms such as Windows and Linux.
-
-## Compilation and execution
-Please install the cmake tool and use it to build the project. It can be compiled and run on VS or Xcode. 
-
-Source code: https://github.com/openlinyou/openthread
+## 编译和执行
+请安装cmake工具，用cmake构建工程，可以在vs或者xcode上编译运行。
+源代码：https://github.com/openlinyou/openthread
 ```
-# Clone the project
+#克隆项目
 git clone https://github.com/openlinyou/openthread
 cd ./openthread
-# Create a build project directory
+#创建build工程目录
 mkdir build
 cd build
-# If it is win32, openthread.sln will appear in this directory. Click it to start VS for coding and debugging.
+#如果是win32，在该目录出现openthread.sln，点击它就可以启动vs写代码调试
 cmake ..
 make
 ./test
 ```
 
-## Technical Features
-The technical features of OpenThread: 
-
-1. Cross-platform design that provides a unified pthread interface for Linux. 
-
-2. Thread pool management uses smart pointers and lock-free maps to achieve efficient access to thread objects.
-
-3. Each thread has its own message queue. Messages are atomically locked when placed in the queue, while reading from the message queue is a lock-free operation. This ensures efficient exchange of information between threads. 
-
-4. Thread interaction data is managed using smart pointers to achieve automated memory management without worrying about memory leaks.
+## 技术特点
+OpenThread的技术特点：
+跨平台设计，提供Linux统一的pthread接口。
+线程池管理采用智能指针和无锁map，实现高效访问线程对象。
+每个线程自带消息队列，消息放入队列原子锁，而读取消息队列，无锁操作。保证线程交换信息高效。
+线程交互数据，采用智能指针管理，实现内存自动化管理，无需担忧内存泄漏。
 
 
-## 1.Create Thread HelloWorld
+## 1.创建线程HelloWorld
 ```C++
-// This function will be called when the child thread receives one of 
-//three types of messages: thread start, exit and receive message.
+#include <assert.h>
+#include <stdio.h>
+#include "openthread.h"
+using namespace open;
+
+//子线程接收到三种消息就会调用此函数，三种消息为线程启动、退出和接收消息，
 void TestThread(OpenThreadMsg& msg)
 {
     if (msg.state_ == OpenThread::START)
     {
         printf("Hello OpenThread\n");
-        // Sleep for 1 second
+        //睡眠1秒钟
         OpenThread::Sleep(1000);
-        // Exit thread
+        //退出线程
         msg.thread().stop();
     }
 }
 int main()
 {
-    // Create a thread, name it and set the child thread's run function to TestThread
+    // 创建线程，并对线程取名，并设置子线程运行函数TestThread
     auto thread = OpenThread::Create("Thread", TestThread);
-    // Wait for the child thread to exit
+    // 等待子线程退出
     OpenThread::ThreadJoin(thread);
     printf("Pause\n");
     return getchar();
 }
 ```
 
-## 2.Await operation
-Create an OpenSync object in the current thread, send the OpenSync object to the child thread like a message and block and wait. 
-
-After receiving the message, the child thread sends a message to wake up the blocked thread. Use the OpenSync object to block the current thread and have the child thread return data through OpenSync.
+## 2.阻塞等待子线程返回数据，Await操作
+在当前线程创建OpenSync对象，把OpenSync对象像消息一样发给子线程并阻塞等待，子线程接到该消息后，再发消息唤醒阻塞。
+使用OpenSync对象阻塞当前线程，子线程通过OpenSync返回数据。
 ```C++
 #include <assert.h>
 #include <iostream>
@@ -90,16 +85,16 @@ struct Test1Data
 // Test1
 void Test1Thread(OpenThreadMsg& msg)
 {
-    //Thread start message
+    //线程启动的消息
     if (msg.state_ == OpenThread::START)
     {
         printf("Test1Thread[%s] START\n", msg.name().c_str());
         OpenThread::Sleep(1000);
     }
-    //Message received by the thread
+    //线程接收到的消息
     else if (msg.state_ == OpenThread::RUN)
     {
-        //Received an OpenSync object, wake it up and send a message.
+        //接收到OpenSync对象，对其唤醒并发消息。
         OpenSync* data = (OpenSync*)msg.data<OpenSync>();
         if (data)
         {
@@ -114,7 +109,7 @@ void Test1Thread(OpenThreadMsg& msg)
         }
         OpenThread::Sleep(1000);
     }
-    //Message before thread exit
+    //线程退出前的消息
     else if (msg.state_ == OpenThread::STOP)
     {
         printf("Test1Thread[%s] STOP\n", msg.name().c_str());
@@ -124,46 +119,44 @@ void Test1Thread(OpenThreadMsg& msg)
 
 int main()
 {
-    // Create a new OpenThread object with name "Test1Thread"
+    // 指定线程名，并创建。未填函数，线程未启动状态，需要执行start启动
     auto threadRef = OpenThread::Create("Test1Thread");
-    // Start the created OpenThread object and specify its execution function
+    //启动线程，并指定线程的执行函数
     threadRef.start(Test1Thread);
 
-    // Create an OpenSync object
+    // 创建OpenSync指针对象，C++11不支持std::make_shared，故设计MakeShared
     auto msg = std::shared_ptr<OpenSync>(new OpenSync);
-    // Create a string object to hold data
     auto data = std::shared_ptr<std::string>(new std::string);
-    // Assign data to string object
     data->assign("Waiting for you!");
-    // Put string object into OpenSync object
     msg->put(data);
-    // Send OpenSync object to child thread
+    //向子线程发消息
     threadRef.send(msg);
-    // Wait for response from child thread
+    //阻塞，等待被唤醒
     const Test1Data* ret = msg->awaitReturn<Test1Data>();
     if (ret)
     {
         assert(ret->data_ == "Of Course,I Still Love You!");
         printf("Test1====>>:%s\n", ret->data_.c_str());
     }
-    // Stop child thread
+    //停止子线程
     threadRef.stop();
-    // Wait for child thread to exit
+
+    //join等待子线程退出
     OpenThread::ThreadJoin(threadRef);
     printf("Pause\n");
     return getchar();
 }
 ```
 
-## 3.Communication between threads
-Create sub-threads dog and cat respectively, and communicate with each other between sub-thread dog and sub-thread cat. 
-This is a small story about a dog walking a cat.
+## 3.线程之间进行通信
+分别创建子线程dog和子线程cat，子线程dog和子线程cat之间互相通信。
+这是一个dog溜cat的小故事。
 ```C++
 #include <assert.h>
 #include <stdio.h>
 #include "openthread.h"
 using namespace open;
-//Sub-threads dog
+//dog子线程
 void Test2ThreadDog(OpenThreadMsg& msg)
 {
     assert(msg.name() == "dog");
@@ -176,10 +169,10 @@ void Test2ThreadDog(OpenThreadMsg& msg)
         const std::string* data = msg.data<std::string>();
         if (!data) break;
         printf("Test2ThreadDog[%s] MSG:%s\n", msg.name().c_str(), data->c_str());
-        //Message from the main thread.
+        //来自主线程的消息
         if (*data == "Hello dog! Catch cat!")
         {
-        	//Send a message to the cat sub-thread.
+        	//向cat子线程发消息
             auto data = OpenThread::MakeShared<std::string>();
             data->assign("Hello cat! Catch you!");
             auto cat = OpenThread::Thread("cat");
@@ -188,10 +181,10 @@ void Test2ThreadDog(OpenThreadMsg& msg)
                 printf("Test2ThreadDog[%s] send failed\n", msg.name().c_str());
             }
         }
-        //Message from the cat sub-thread.
+        //来自子线程cat的消息
         else if (*data == "Bang dog!")
         {
-        	//Close the cat sub-thread.
+        	//关闭子线程cat
             auto cat = OpenThread::Thread("cat");
             cat.stop();
         }
@@ -208,7 +201,7 @@ void Test2ThreadDog(OpenThreadMsg& msg)
         break;
     }
 }
-//Sub-threads cat
+//cat子线程
 void Test2ThreadCat(OpenThreadMsg& msg)
 {
     assert(msg.name() == "cat");
@@ -221,12 +214,12 @@ void Test2ThreadCat(OpenThreadMsg& msg)
         const std::string* data = msg.data<std::string>();
         if (!data) break;
         printf("Test2ThreadCat[%s] MSG:%s\n", msg.name().c_str(), data->c_str());
-        //Message from the dog sub-thread.
+        //来自子线程dog的消息
         if (*data == "Hello cat! Catch you!")
         {
             auto data = OpenThread::MakeShared<std::string>();
             data->assign("Bang dog!");
-            // Send a message to the dog sub-thread.
+            //向子线程dog发消息
             if (!OpenThread::Send("dog", data))
             {
                 printf("Test2ThreadCat[%s] send failed\n", msg.name().c_str());
@@ -236,8 +229,7 @@ void Test2ThreadCat(OpenThreadMsg& msg)
     }
     case OpenThread::STOP:
         printf("Test2ThreadCat[%s] STOP\n", msg.name().c_str());
-        // The dog thread closed the cat, and before closing, 
-        // the cat thread also closed the dog thread and fought back.
+        // dog线程关闭了cat，cat线程在关闭前，也关闭dog线程，进行回击。
         OpenThread::Stop("dog");
         break;
     default:
@@ -246,34 +238,27 @@ void Test2ThreadCat(OpenThreadMsg& msg)
 }
 int main()
 {
-    // Create sub-threads dog and cat
+    // 创建子线程dog和cat
     auto dog = OpenThread::Create("dog", Test2ThreadDog);
     auto cat = OpenThread::Create("cat", Test2ThreadCat);
-    // Send a message to the dog sub-thread
+    // 向子线程dog发消息
     auto data = OpenThread::MakeShared<std::string>();
     data->assign("Hello dog! Catch cat!");
     if (!dog.send(data))
     {
         printf("Test2Thread send failed\n");
     }
-    // Wait for sub-threads to exit
+    // 等待子线程退出
     OpenThread::ThreadJoin({ "dog", "cat" });
     return getchar();
 }
 ```
 
-## 4.Batch creation and management of threads
-Batch creation and management of threads When OpenThread starts, it will default to setting the maximum number of threads that can be created. 
-
-After exceeding this number, it cannot be modified. So at program startup, you can use OpenThread::Init(256) to specify the maximum number of threads. 
-
-The main goal of threads is to leverage multi-core performance. Creating too many threads will result in performance loss. 
-
-It is best to have twice the number of CPU cores for the number of threads.
-
-Try to avoid frequent creation and destruction of threads. To prevent confusion between threads, a thread pool OpenThreadPool was designed. 
-
-You can configure dedicated thread pools for different businesses.
+## 4.批量创建和管理线程
+OpenThread启动的时候，会默认设定创建线程的最大数量。超过以后，就不能修改。
+所以，在程序启动的时候，用OpenThread::Init(256)可以指定线程最大数量。线程的目标主要是发挥多核性能。
+创建太多线程会带来性能损耗，最好线程数是CPU核数的2倍。尽量避免频繁创建和销毁线程。
+为了防止线程之间混淆，设计了线程池OpenThreadPool。可以对不同的业务配置专门的线程池。
 ```C++
 #include <assert.h>
 #include <iostream>
@@ -289,32 +274,32 @@ void Test3Thread2(OpenThreadMsg& msg)
 }
 void Test3()
 {
-	// Specify the maximum number of threads that can be created. This can only be modified at program startup.
-    OpenThread::Init(256);
+	//指定线程最大数量限制，只有程序启动的时候才可修改
+	OpenThread::Init(256);
     size_t capacity = OpenThread::GetThreadCapacity();
     assert(capacity == 256)
     for (size_t pid = 0; pid < capacity; pid++)
     {
-        // OpenThread::Thread queries the OpenThread thread object
-        auto threadRef = OpenThread::Thread("Thread_" + std::to_string(pid));
-        // Since no threads have been created yet, it is null
+    	//OpenThread::Thread查询线程对象OpenThread
+        auto threadRef = OpenThread::Thread("Thread_"+std::to_string(pid));
+        //由于没有创建任何线程，故是null
         assert(!threadRef);
     }
-    // Total number of thread names. Thread names exist once specified.
+    //全部线程名称数量，线程名称指定后就一直存在。
     assert(OpenThread::GetThreadSize() == 0);
-    
-    // Create a smart pointer object to send to the sub-thread. The string "sendMsg"
+    //创建智能指针对象，发给子线程。字符串"sendMsg"
     auto data = OpenThread::MakeShared<std::string>();
     data->assign("sendMsg");
     std::string name;
+    //创建1024条线程
     for (int pid = 0; pid < capacity; pid++)
     {
         name = "Thread_" + std::to_string(pid);
-        // OpenThread::Create creates a thread with a specified name. If a thread with that name already exists, it returns that thread.
-        // Once successful, the thread will have a name. You can view it using top -Hp. Windows systems do not have thread names.
+        //OpenThread::Create创建指定名称的线程，如果名称绑定的线程存在，就返回该线程。
+        //成功以后便有线程名。 top -Hp可以查看。window系统没有线程名
         auto threadRef = OpenThread::Create(name, Test3Thread1);
         assert(threadRef && threadRef.pid() == pid && threadRef.name() == name);
-        //Three ways to send messages to sub-threads: via the thread object, via the thread ID (not the system thread ID but the array index ID), and via the thread name
+        //三种方式向子线程发消息，线程对象、线程id（不是系统线程id，是数组索引id）、线程名称
         threadRef.send(data);
         OpenThread::Send(pid, data);
         OpenThread::Send(name, data);
@@ -324,18 +309,18 @@ void Test3()
     for (size_t pid = 0; pid < capacity; pid++)
     {
         name = "Thread_" + std::to_string(pid);
-        // Query thread by thread name. Querying threads by thread name is less efficient than querying by thread id.
+        //通过线程名查询线程，通过线程名查询线程效率比较差，推荐使用线程id查询。
         auto threadRef = OpenThread::Thread(name);
         assert(threadRef && threadRef.name() == name);
-        //Stop child thread
+        //关闭子线程
         threadRef.stop();
     }
     printf("Test3 do stop\n");
-    //Wait for all child threads to close and exit
+    //等待全部子线程关闭退出
     OpenThread::ThreadJoinAll();
     printf("Test3 finish waitStop\n");
-    // Create child threads again. Child thread names will always exist and occupy capacity.
-    // Unless you call OpenThread::StopAll() to close and clean up all child threads and start over.
+    // 再次创建子线程，子线程名称会一直存在，占用容量。
+    //除非调用OpenThread::StopAll()，关闭清理全部子线程，推倒重来。
     for (size_t pid = 0; pid < capacity; pid++)
     {
         name = "Thread_" + std::to_string(pid);
@@ -343,10 +328,10 @@ void Test3()
         assert(threadRef && threadRef.pid() == pid && threadRef.name() == name);
     }
     printf("Test3 finish create again\n");
-    // The number of child thread names exceeds the maximum capacity, so creating with "over_boundary" fails
+    //子线程名字数量超过最大容量，故用"over_boundary"创建失败
     auto threadRef = OpenThread::Create("over_boundary");
     assert(!threadRef);
-    // Close and exit all threads and clean up
+    //关闭退出全部线程，并进行清理
     OpenThread::StopAll();
 }
 //线程池测试
@@ -369,10 +354,9 @@ void Test5Thread2(OpenThreadMsg& msg)
         OpenThread::Sleep(1000);
     }
 }
-//Thread pool test.
 void Test5()
 {
-    //Create a new thread pool. 
+    //新建线程池
     OpenThreadPool pool;
     pool.init(64);
 
@@ -382,7 +366,7 @@ void Test5()
         thread->start(Test5Thread2);
         thread->stop();
     }
-    //Stop all threads in this thread pool.
+    //停止该线程池的全部线程
     pool.stopAll();
     pool.threadJoinAll();
 }
@@ -395,15 +379,11 @@ int main()
 }
 ```
 
-## 5.Design a multi-threaded concurrent framework.
-Use the Worker class to encapsulate OpenThread, one thread for one Worker business. 
-
-Inspector (monitor), Timer (timer) and Server (server) inherit from Worker. 
-Inspector is responsible for monitoring the running information of multiple Timers and performing load balancing. 
-
-Timer provides timer services. When started, it registers with Inspector and provides running information. 
-
-Server queries available Timers from Inspector and then requests timer services from this Timer.
+## 5.设计一个多线程并发框架
+用Worker类封装使用OpenThread，一条线程一个Worker业务。Inspector(监控)、Timer(定时器)和Server(服务器)继承Worker。
+Inspector负责监控多个Timer运行信息，做负载均衡。
+Timer提供定时器服务，启动时，向Inspector注册，并提供运行信息。
+Server向Inspector查询可用的Timer，然后向此Timer请求定时服务。
 ```C++
 #include <assert.h>
 #include <iostream>
@@ -413,16 +393,16 @@ Server queries available Timers from Inspector and then requests timer services 
 #include "openthread.h"
 
 using namespace open;
-//Assume it's a Google protobuf object
+//假设是谷歌protobuff对象
 struct ProtoBuffer
 {
-	//Virtual function in base class
+	//父类虚函数
     virtual ~ProtoBuffer() {}
 };
-//Intermediate data structure for communication between Worker classes
+//Worker类通信的中间数据结构
 class Data
 {
-    ProtoBuffer* proto_; //Data carried
+    ProtoBuffer* proto_; //携带的数据
 public:
     Data() :proto_(0), srcPid_(-1) {}
     Data(int pid, const std::string& name, const std::string& key, ProtoBuffer* proto)
@@ -432,9 +412,9 @@ public:
         if (proto_) delete proto_;
         proto_ = 0;
     }
-    int srcPid_; // ID of the sending worker
-    std::string rpc_; // Name of the routing function
-    std::string srcName_; // Name of the sending worker
+    int srcPid_; //发送方的worker的ID
+    std::string rpc_; //路由函数名称
+    std::string srcName_; //发送方的worker名称
     template <class T>
     const T& proto() const 
     {
@@ -466,38 +446,38 @@ public:
     }
     void start()
     {
-    	// Query the thread corresponding to name, not created, so it is null
+    	//查询name对应的线程，没有创建，故是null
         auto threadRef = OpenThread::Thread(name_);
         assert(!threadRef);
-        // Create a thread named name
+        //创建名字为name的线程
         threadRef = OpenThread::Create(name_);
         assert(threadRef);
         if (threadRef)
         {
-            // Get the real object of the thread for using its advanced features.
-            // Note that only advanced features can be used in this thread, otherwise it will cause data conflicts between threads
+        	//获取线程真实对象，以便使用其高级功能。
+        	//注意只能在该线程使用高级功能，否则会导致线程读取数据冲突
             thread_ = OpenThread::GetThread(threadRef);
             assert(!thread_->isRunning());
-            // Can only be specified once and can only be accessed in child thread.
+            //只能指定一次，只能在子线程访问
             thread_->setCustom(this);
-            // Specify the function and start the thread,
+            //指定函数，并启动线程，
             thread_->start(Worker::Thread);
         }
     }
-    // After all threads are started, the main thread sends a message to call do_start
+    //线程全部启动后，主线程发消息do_start调用
     void do_start(const Data& data)
     {
         onStart();
     }
-    // Called when the thread starts
+    //线程启动时，调用
     virtual void onInit()
     {
     }
-    // Called after all threads have started,
+    //线程全部启动后调用，
     virtual void onStart()
     {
     }
-    //This method is called after this child thread receives a message.
+    //本子线程收到消息后，调用此方法。
     virtual void onMsg(const Data& data)
     {
         printf("[%s]receive<<=[%s] key:%s\n", name_.c_str(), data.srcName_.c_str(), data.rpc_.c_str());
@@ -513,7 +493,7 @@ public:
         }
         printf("[%s]no implement key:%s\n", name_.c_str(), data.rpc_.c_str());
     }
-    // Send a message to the thread with ID sid. This method will call delete to release proto and can only be passed once. Managed by std::shared_ptr
+    // 向线程sid发送消息，该方法会调用delete释放proto,只能传一次，由std::shared_ptr管理
     bool send(int sid, const std::string& key, ProtoBuffer* proto)
     {
         printf("[%s]send=>[%s] key:%s\n", name_.c_str(), WorkerName(sid).c_str(), key.c_str());
@@ -522,7 +502,7 @@ public:
         //assert(ret);
         return ret;
     }
-    // Send a message to the thread named name. This method will call delete to release proto and can only be passed once. Managed by std::shared_ptr
+    // 向线程名为name发送消息，该方法会调用delete释放proto,只能传一次，由std::shared_ptr管理
     bool send(const std::string& name, const std::string& key, ProtoBuffer* proto)
     {
         printf("[%s]send=>[%s] key:%s\n", name_.c_str(), name.c_str(), key.c_str());
@@ -531,7 +511,7 @@ public:
         //assert(ret);
         return ret;
     }
-    // Send a message to multiple threads with ID sid. This method will call delete to release proto and can only be passed once. Managed by std::shared_ptr
+    // 向多个线程sid发送消息，该方法会调用delete释放proto,只能传一次，由std::shared_ptr管理
     bool send(std::vector<int>& vectSid, const std::string& key, ProtoBuffer* proto)
     {
         printf("[%s]send=>size[%d] key:%s\n", name_.c_str(), (int)vectSid.size(), key.c_str());
@@ -540,7 +520,7 @@ public:
         //assert(ret);
         return ret;
     }
-    // Send a message to multiple threads with Name. This method will call delete to release proto and can only be passed once. Managed by std::shared_ptr
+    // 向多个线程名为name发送消息，该方法会调用delete释放proto,只能传一次，由std::shared_ptr管理
     bool send(std::vector<std::string>& vectName, const std::string& key, ProtoBuffer* proto)
     {
         printf("[%s]send=>size[%d] key:%s\n", name_.c_str(), (int)vectName.size(), key.c_str());
@@ -549,7 +529,7 @@ public:
         //assert(ret);
         return ret;
     }
-    //Stop thread
+    //停止本线程
     void stop()
     {
         auto threadRef = OpenThread::Thread(name_);
@@ -567,11 +547,11 @@ public:
             thread_.reset();
         }
     }
-    //Thread exit.
+    //线程调出时，调用
     virtual void onStop()
     {
     }
-    //Thread Funciton
+    //本线程绑定的函数
     static void Thread(OpenThreadMsg& msg)
     {
         Worker* that = msg.custom<Worker>();
@@ -593,6 +573,7 @@ public:
         const Data* data = msg.data<Data>();
         if (data) that->onMsg(*data);
     }
+    //提供给主线程发消息
     static bool Send(std::vector<std::string>& vectName, const std::string& key, ProtoBuffer* proto)
     {
         printf("Send=>size[%d] key:%s\n", (int)vectName.size(), key.c_str());
@@ -606,6 +587,7 @@ public:
     static inline int WorkerId(const std::string& name) { return OpenThread::ThreadId(name); }
     static inline const std::string& WorkerName(int pid) { return OpenThread::ThreadName(pid); }
 protected:
+	//给当前线程发消息
     void sendLoop(const std::string& key)
     {
         auto proto = new ProtoBuffer;
@@ -625,13 +607,13 @@ protected:
     std::shared_ptr<OpenThread> thread_;
     std::unordered_map<std::string, Rpc> mapKeyFunc_;
 };
-// Imitate protobuff data, request timer data structure
+// 模仿protobuff数据，请求定时器数据结构
 struct TimerEventMsg :public ProtoBuffer
 {
     int workerId_;
     int64_t deadline_;
 };
-// Imitate protobuff data, timer information data structure
+// 模仿protobuff数据，定时器信息数据结构
 struct TimerInfoMsg :public ProtoBuffer
 {
     TimerInfoMsg() 
@@ -641,7 +623,7 @@ struct TimerInfoMsg :public ProtoBuffer
     int64_t cpuCost_;
     int64_t dataTime_;
 };
-//Monitor class, get timer information for load balancing of Timer
+//监控类，获取定时器信息，为Server做负载均衡
 class Inspector:public Worker
 {
     std::unordered_map<std::string, TimerInfoMsg> mapTimerInfo_;
@@ -656,7 +638,7 @@ public:
     virtual void onStart()
     {
     }
-    //Get information from the timer
+    //向定时器获取信息
     void start_inspect(const Data& data)
     {
         std::vector<int> vectPid;
@@ -669,7 +651,7 @@ public:
         auto proto = new ProtoBuffer;
         send(vectPid, "get_timer_info", proto);
     }
-	// Receive information from the timer
+	//接收定时器的信息
     void return_timer_info(const Data& data)
     {
         auto& proto = data.proto<TimerInfoMsg>();
@@ -683,7 +665,7 @@ public:
             vectQueryId.clear();
         }
     }
-    //Provide the most idle timer ID to the Server.
+    //向Server提供最空闲的定时器ID
     void query_timer_info(const Data& data)
     {
         TimerInfoMsg* tmpInfo = 0;
@@ -715,11 +697,11 @@ public:
         }
     }
 };
-//Timer object class
+//定时器对象
 class Timer:public Worker
 {
     int inspectorId_;
-    //Timed events, from small to large, can have multiple keys. 
+    //定时事件，从小到大，可以多个key。
     std::multimap<int64_t, int> mapTimerEvent;
 public:
     Timer(const std::string& name):Worker(name) 
@@ -733,7 +715,7 @@ public:
     {
         sendLoop("start_timer");
     }
-    //Timing logic, if the timer is triggered, send a timed event 
+    //定时逻辑，如果触发定时就发送定时事件
     void start_timer(const Data& data)
     {
         int64_t curTime = 0;
@@ -747,7 +729,7 @@ public:
                     auto iter = mapTimerEvent.begin();
                     if (curTime > iter->first)
                     {
-                    	//Trigger the timer and send a timed event
+                    	//触发定时，发送定时事件
                         auto proto = new TimerEventMsg;
                         proto->workerId_ = pid();
                         proto->deadline_ = curTime;
@@ -763,7 +745,7 @@ public:
             }
             if (inspectorId_ < 0)
             {
-            	//Register with the monitor and send your own running information
+            	//向监控注册，并发送自身运行信息
                 inspectorId_ = WorkerId("Inspector");
                 if (inspectorId_ >= 0)
                 {
@@ -778,7 +760,7 @@ public:
             OpenThread::Sleep(10);
         }
     }
-    // Provide timer operation information.
+    // 提供定时器运行信息
     void get_timer_info(const Data& data)
     {
         auto proto = new TimerInfoMsg;
@@ -789,8 +771,7 @@ public:
         send(data.srcPid_, "return_timer_info", proto);
         sendLoop("start_timer");
     }
-    // Receive the timer subscription event from the Server. 
-    // After the timer is triggered, send the event back.
+    //接收Server的定时器订阅事件，定时器触发后，就把事件发送回去。
     void request_timer(const Data& data)
     {
         auto& proto = data.proto<TimerEventMsg>();
@@ -798,9 +779,7 @@ public:
         sendLoop("start_timer");
     }
 };
-
-// Business service queries the monitor for available timers 
-// and then requests a timed event from this timer. 
+//业务，向监控查询可用的定时器，然后向此定时器请求定时事件
 class Server:public Worker
 {
     int inspectorId_;
@@ -827,7 +806,7 @@ public:
     {
         sendLoop("start_work");
     }
-    // Query the monitor for available timers.
+    //向监控查询可用定时器
     void start_work(const Data& data)
     {
         while (true)
@@ -842,7 +821,7 @@ public:
             OpenThread::Sleep(1000);
         }
     }
-    // The timer information returned by the monitor is then used to request a timed event from that timer. 
+    //监控返回的定时器信息，然后向该定时器请求定时事件
     void query_timer_info(const Data& data)
     {
         auto& proto = data.proto<TimerInfoMsg>();
@@ -862,10 +841,10 @@ public:
             sendLoop("start_work");
         }
     }
-    // After the timer is triggered, the timed event is sent back. 
+    //定时器触发以后，发送回来的定时事件
     void return_timer(const Data& data)
     {
-    	// After the test times are reached, stop testing and close all threads.
+    	//测试次数到达后，停止测试，关闭全部线程
         if (collect_++ > 100)
         {
             OpenThread::StopAll();
@@ -877,7 +856,7 @@ public:
 
 int main()
 {
-	// Create an Inspector, 2 Timers and 2 Servers
+	//创建一个Inspector，2个Timer和2个Server
     std::vector<Worker*> vectWorker =
     {
         new Inspector("Inspector"),
@@ -886,18 +865,18 @@ int main()
         new Server("server1"),
         new Server("server2")
     };
-    // Start Workers
+    //启动Worker
     std::vector<std::string> vectName;
     for (size_t i = 0; i < vectWorker.size(); i++)
     {
         vectName.push_back(vectWorker[i]->name_);
         vectWorker[i]->start();
     }
-    // After all have started, send start message.
+    //全部启动以后，发送start消息
     Worker::Send(vectName, "do_start", NULL);
-    // Wait for all threads to exit.
+    //等待全部线程退出
     OpenThread::ThreadJoinAll();
-    // Release memory
+    //释放内存
     for (size_t i = 0; i < vectWorker.size(); i++)
     {
         delete vectWorker[i];
