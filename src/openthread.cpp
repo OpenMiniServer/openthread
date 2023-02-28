@@ -196,7 +196,8 @@ bool OpenThread::start(void (*cb)(const Msg&))
         assert(false);
         return false;
     }
-    OpenThreadRef ref = pool_->thread(name_);
+    OpenThreadRef ref;
+    ref.thread_ = pool_->thread(name_);
     if (!ref)
     {
         assert(false);
