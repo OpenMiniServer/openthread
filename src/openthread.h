@@ -65,6 +65,7 @@ namespace open
 {
 
 class OpenThreadRef;
+class OpenThreadPool;
 class OpenThread
 {
 public:
@@ -78,7 +79,7 @@ public:
     {
         OpenThread* thread_;
         std::shared_ptr<void> data_;
-        Msg():thread_(0), data_(0) {};
+        Msg():thread_(0), data_(0), state_(START) {};
     public:
         State state_;
         template <class T>
@@ -148,7 +149,7 @@ private:
     void run();
     static void Run(void* arg);
     OpenThread(const std::string& name);
-    OpenThread(const OpenThread&) {}
+    OpenThread(const OpenThread&);
     void operator=(const OpenThread&) {}
 
     int pid_;
@@ -161,6 +162,7 @@ private:
     pthread_cond_t cond_;
     pthread_mutex_t mutex_;
     void (*cb_)(const Msg&);
+    OpenThreadPool* pool_;
 
     bool profile_;
     size_t totalCount_;
@@ -209,49 +211,8 @@ private:
     Node* popNode();
     std::queue<Node*> queueCache_;
 private:
-	class SafeMap
-	{
-        size_t capacity_;
-        std::vector<std::shared_ptr<OpenThread>> vectValues_;
-        std::vector<std::shared_ptr<const std::string>> vectKeys_;
-		SafeMap(const SafeMap& that) {}
-		void operator=(const SafeMap& that) {}
-	public:
-        SafeMap();
-        SafeMap(size_t capacity);
-        ~SafeMap();
-        bool isFull();
-        void clear();
-        size_t size();
-        size_t capacity() { return vectKeys_.size(); }
-        //void clear(const std::string& name);
-        void setCapacity(size_t capacity);
-        std::shared_ptr<OpenThread> operator[](size_t pid);
-		std::shared_ptr<OpenThread> operator[](const std::string& name);
-        int set(std::shared_ptr<OpenThread>& value);
-	};
-    struct ThreadInstance
-    {
-        bool profile_;
-        SafeMap safeMap_;
-        volatile bool isInit_;
-        volatile bool isClearIng_;
-        pthread_mutex_t mutex_;
-
-        ThreadInstance();
-        ~ThreadInstance();
-
-        void lock();
-        void unlock();
-
-        bool init(size_t capacity, bool profile);
-        bool checkInit();
-        void stop();
-        size_t size();
-        size_t capacity();
-    };
-    static ThreadInstance Instance_;
-
+    static OpenThreadPool DefaultPool_;
+    friend class OpenThreadPool;
  public:
      static inline bool Send(const std::initializer_list<int>& list, const std::shared_ptr<void>& data) 
      { std::vector<int> v = list;return Send(v, data); }
@@ -262,6 +223,68 @@ private:
      static inline void ThreadJoin(const std::initializer_list<std::string>& list) 
      { std::vector<std::string> v = list; return ThreadJoin(v); }
 };
+
+class OpenThreadPool
+{
+    class SafeMap
+    {
+        size_t capacity_;
+        std::vector<std::shared_ptr<OpenThread>> vectValues_;
+        std::vector<std::shared_ptr<const std::string>> vectKeys_;
+        SafeMap(const SafeMap& that);
+        void operator=(const SafeMap& that) {}
+    public:
+        SafeMap();
+        SafeMap(size_t capacity);
+        ~SafeMap();
+        bool isFull();
+        void clear();
+        size_t size();
+        size_t capacity() { return vectKeys_.size(); }
+        void setCapacity(size_t capacity);
+        std::shared_ptr<OpenThread> operator[](size_t pid);
+        std::shared_ptr<OpenThread> operator[](const std::string& name);
+        int set(std::shared_ptr<OpenThread>& value);
+    };
+public:
+    OpenThreadPool();
+    ~OpenThreadPool();
+
+    void lock();
+    void unlock();
+
+    bool init(size_t capacity, bool profile = true);
+    bool checkInit();
+    void stopAll();
+    size_t size();
+    size_t capacity();
+
+    std::shared_ptr<OpenThread> create(const std::string& name);
+    std::shared_ptr<OpenThread> create(const std::string& name, void (*cb)(const OpenThread::Msg&));
+    std::shared_ptr<OpenThread> thread(int pid);
+    std::shared_ptr<OpenThread> thread(const std::string& name);
+    const std::string& threadName(int pid);
+    int threadId(const std::string& name);
+
+    bool send(int pid, const std::shared_ptr<void>& data);
+    bool send(const std::string& name, const std::shared_ptr<void>& data);
+    bool send(const std::vector<int>& vectPid, const std::shared_ptr<void>& data);
+    bool send(const std::vector<std::string>& vectName, const std::shared_ptr<void>& data);
+    bool stop(int pid);
+    bool stop(const std::string& name);
+    void threadJoin(const std::shared_ptr<OpenThread>& ref);
+    void threadJoin(const std::vector<int>& vectPid);
+    void threadJoin(const std::vector<std::string>& vectName);
+    void threadJoinAll();
+
+private:
+    bool profile_;
+    SafeMap safeMap_;
+    volatile bool isInit_;
+    volatile bool isClearIng_;
+    pthread_mutex_t mutex_;
+};
+
 
 typedef const OpenThread::Msg OpenThreadMsg;
 
@@ -296,21 +319,24 @@ class OpenSync
         volatile bool isSleep_;
         pthread_cond_t cond_;
         pthread_mutex_t mutex_;
-        std::shared_ptr<void> data_;
+        std::shared_ptr<void> srcData_;
+        std::shared_ptr<void> destData_;
         OpenSyncRef();
-        OpenSyncRef(const OpenSyncRef&) {}
+        OpenSyncRef(const OpenSyncRef&);
         void operator=(const OpenSyncRef&) {}
     public:
         ~OpenSyncRef();
         // sleep current Thread
-        bool sleep();
+        bool await();
         template <class T>
-        inline const T* sleepBack()
+        inline const T* awaitReturn()
         {
-            if (!sleep())
+            if (!await())
                 return NULL;
-            return dynamic_cast<const T*>((const T*)data_.get());
+            return dynamic_cast<const T*>((const T*)destData_.get());
         }
+        template <class T>
+        inline const T* get() { return dynamic_cast<const T*>((const T*)srcData_.get()); }
         // wakeup sleep Thread
         bool wakeup();
         bool wakeup(const std::shared_ptr<void>& data);
@@ -318,15 +344,16 @@ class OpenSync
     };
     std::shared_ptr<OpenSyncRef> sync_;
 public:
-    OpenSync()
-    {
-        sync_ = std::shared_ptr<OpenSyncRef>(new OpenSyncRef);
-    }
+    OpenSync() { sync_ = std::shared_ptr<OpenSyncRef>(new OpenSyncRef);}
     OpenSync(const OpenSync& that) { sync_ = that.sync_; }
     void operator=(const OpenSync& that) { sync_ = that.sync_; }
-    inline void sleep() { if (sync_) sync_->sleep(); }
+    void operator=(const std::shared_ptr<void>& data) { if (sync_) sync_->srcData_ = data; }
+    void put(const std::shared_ptr<void>& data) { if (sync_) sync_->srcData_ = data; }
     template <class T>
-    inline const T* sleepBack() { if (sync_) return sync_->sleepBack<T>(); return 0; }
+    inline const T* get() { if (sync_) return sync_->get<T>(); return 0; }
+    inline void await() { if (sync_) sync_->await(); }
+    template <class T>
+    inline const T* awaitReturn() { if (sync_) return sync_->awaitReturn<T>(); return 0; }
     inline bool wakeup() { if (sync_) return sync_->wakeup(); return false; }
     inline bool wakeup(const std::shared_ptr<void>& data) { if (sync_) return sync_->wakeup(data); return false; }
     operator bool() const { return !!sync_; }

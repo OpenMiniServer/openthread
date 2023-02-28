@@ -11,16 +11,19 @@ Windows、linux等跨平台设计
 请安装cmake工具，用cmake构建工程，可以在vs或者xcode上编译运行。
 源代码：https://github.com/openlinyou/openthread
 ```
+#克隆项目
 git clone https://github.com/openlinyou/openthread
 cd ./openthread
+#创建build工程目录
 mkdir build
 cd build
+#如果是win32，在该目录出现openthread.sln，点击它就可以启动vs写代码调试
 cmake ..
 make
 ./test
 ```
 
-## 1.创建线程
+## 1.创建线程HelloWorld
 ```C++
 #include <assert.h>
 #include <stdio.h>
@@ -45,18 +48,23 @@ int main()
     auto thread = OpenThread::Create("Thread", TestThread);
     // 等待子线程退出
     OpenThread::ThreadJoin(thread);
+    printf("Pause\n");
     return getchar();
 }
 ```
 
-## 2.阻塞等待子线程返回数据
+## 2.阻塞等待子线程返回数据，Await操作
 在当前线程创建OpenSync对象，把OpenSync对象像消息一样发给子线程并阻塞等待，子线程接到该消息后，再发消息唤醒阻塞。
 使用OpenSync对象阻塞当前线程，子线程通过OpenSync返回数据。
 ```C++
 #include <assert.h>
+#include <iostream>
 #include <stdio.h>
 #include "openthread.h"
+
 using namespace open;
+
+// Test1
 struct Test1Data
 {
     std::string data_;
@@ -65,55 +73,69 @@ struct Test1Data
         printf("Test1:~Test1Data\n");
     }
 };
+
+// Test1
 void Test1Thread(OpenThreadMsg& msg)
 {
-	//线程第一次启动消息
+    //线程启动的消息
     if (msg.state_ == OpenThread::START)
     {
         printf("Test1Thread[%s] START\n", msg.name().c_str());
         OpenThread::Sleep(1000);
     }
-    //本子线程接收到消息
+    //线程接收到的消息
     else if (msg.state_ == OpenThread::RUN)
     {
-        // 接收到OpenSync对象，对其唤醒并发消息。
+        //接收到OpenSync对象，对其唤醒并发消息。
         OpenSync* data = (OpenSync*)msg.data<OpenSync>();
         if (data)
         {
+            const std::string* str = data->get<std::string>();
+            if (str)
+            {
+                assert(*str == "Waiting for you!");
+            }
             auto sptr = std::shared_ptr<Test1Data>(new Test1Data);
-            sptr->data_.assign("I come back!");
+            sptr->data_.assign("Of Course,I Still Love You!");
             data->wakeup(sptr);
         }
         OpenThread::Sleep(1000);
     }
-    //子线程退出前的消息
+    //线程退出前的消息
     else if (msg.state_ == OpenThread::STOP)
     {
         printf("Test1Thread[%s] STOP\n", msg.name().c_str());
         OpenThread::Sleep(1000);
     }
 }
+
 int main()
 {
     // 指定线程名，并创建。未填函数，线程未启动状态，需要执行start启动
     auto threadRef = OpenThread::Create("Test1Thread");
     //启动线程，并指定线程的执行函数
     threadRef.start(Test1Thread);
+
     // 创建OpenSync指针对象，C++11不支持std::make_shared，故设计MakeShared
-    auto msg = OpenThread::MakeShared<OpenSync>();
-    // auto msg = std::make_shared<OpenSyncRef>();
+    auto msg = std::shared_ptr<OpenSync>(new OpenSync);
+    auto data = std::shared_ptr<std::string>(new std::string);
+    data->assign("Waiting for you!");
+    msg->put(data);
     //向子线程发消息
     threadRef.send(msg);
     //阻塞，等待被唤醒
-    const Test1Data* data = msg->sleepBack<Test1Data>();
-    if (data)
+    const Test1Data* ret = msg->awaitReturn<Test1Data>();
+    if (ret)
     {
-        printf("Test1====>>:%s\n", data->data_.c_str());
+        assert(ret->data_ == "Of Course,I Still Love You!");
+        printf("Test1====>>:%s\n", ret->data_.c_str());
     }
     //停止子线程
     threadRef.stop();
+
     //join等待子线程退出
     OpenThread::ThreadJoin(threadRef);
+    printf("Pause\n");
     return getchar();
 }
 ```
@@ -242,12 +264,12 @@ void Test3Thread1(OpenThreadMsg& msg)
 void Test3Thread2(OpenThreadMsg& msg)
 {
 }
-int main()
+void Test3()
 {
 	//指定线程最大数量限制，只有程序启动的时候才可修改
-	OpenThread::Init(1024);
+	OpenThread::Init(256);
     size_t capacity = OpenThread::GetThreadCapacity();
-    assert(capacity == 1024)
+    assert(capacity == 256)
     for (size_t pid = 0; pid < capacity; pid++)
     {
     	//OpenThread::Thread查询线程对象OpenThread
@@ -303,6 +325,48 @@ int main()
     assert(!threadRef);
     //关闭退出全部线程，并进行清理
     OpenThread::StopAll();
+}
+//线程池测试
+void Test5Thread2(OpenThreadMsg& msg)
+{
+    if (msg.state_ == OpenThread::START)
+    {
+        printf("Test1Thread[%s] START\n", msg.name().c_str());
+        OpenThread::Sleep(1000);
+    }
+    else if (msg.state_ == OpenThread::RUN)
+    {
+        // recevie msg
+        printf("Test1Thread[%s] RUN\n", msg.name().c_str());
+        OpenThread::Sleep(1000);
+    }
+    else if (msg.state_ == OpenThread::STOP)
+    {
+        printf("Test1Thread[%s] STOP\n", msg.name().c_str());
+        OpenThread::Sleep(1000);
+    }
+}
+void Test5()
+{
+    //新建线程池
+    OpenThreadPool pool;
+    pool.init(64);
+
+    auto thread = pool.create("Independent");
+    if (thread)
+    {
+        thread->start(Test5Thread2);
+        thread->stop();
+    }
+    //停止该线程池的全部线程
+    pool.stopAll();
+    pool.threadJoinAll();
+}
+int main()
+{
+    Test3();
+    Test5();
+    printf("Pause\n");
     return getchar();
 }
 ```

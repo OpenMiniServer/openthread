@@ -11,8 +11,8 @@ endif()
 
 include_directories(src)
 
-add_executable(test 
-	src/openthread.h 
-	src/openthread.cpp 
-	test/main.cpp
-)
+add_executable(helloworld src/openthread.h src/openthread.cpp test/helloworld.cpp)
+add_executable(sync src/openthread.h src/openthread.cpp test/sync.cpp)
+add_executable(thread_msg src/openthread.h src/openthread.cpp test/thread_msg.cpp)
+add_executable(thread_pool src/openthread.h src/openthread.cpp test/thread_pool.cpp)
+add_executable(actor_server src/openthread.h src/openthread.cpp test/actor_server.cpp)

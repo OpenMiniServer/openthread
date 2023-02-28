@@ -96,11 +96,11 @@ void OpenThread::SafeQueue::clear()
 
 void OpenThread::SafeQueue::popAll()
 {
-    spinLock_.lock();
+    //spinLock_.lock();
     Node* node = head_.next_;
     head_.next_ = 0;
     tail_ = &head_;
-    spinLock_.unlock();
+    //spinLock_.unlock();
     if (node)
     {
         assert(vectCache_.empty());
@@ -147,7 +147,8 @@ void OpenThread::SafeQueue::push(OpenThread::Node* node)
 //OpenThread
 OpenThread::OpenThread(const std::string& name)
     :state_(STOP),
-    name_(name)
+    name_(name),
+    pool_(0)
 {
     cb_ = 0;
     pid_ = -1;
@@ -161,6 +162,23 @@ OpenThread::OpenThread(const std::string& name)
     pthread_cond_init(&cond_, NULL);
 }
 
+OpenThread::OpenThread(const OpenThread&)
+{
+    assert(false);
+    pool_ = 0;
+    cb_ = 0;
+    pid_ = -1;
+    leftCount_ = 0;
+    totalCount_ = 0;
+    isIdle_ = false;
+    custom_ = 0;
+    memset(&threadId_, 0, sizeof(threadId_));
+
+    pthread_mutex_init(&mutex_, NULL);
+    pthread_cond_init(&cond_, NULL);
+}
+
+
 OpenThread::~OpenThread()
 {
     assert(state_ == STOP);
@@ -173,7 +191,12 @@ OpenThread::~OpenThread()
 
 bool OpenThread::start(void (*cb)(const Msg&))
 {
-    OpenThreadRef ref = Thread(name_);
+    if (!pool_)
+    {
+        assert(false);
+        return false;
+    }
+    OpenThreadRef ref = pool_->thread(name_);
     if (!ref)
     {
         assert(false);
@@ -393,264 +416,94 @@ void OpenThread::run()
     //printf("OpenThread[%s] exit===>>\n", name_.c_str());
 }
 
-//OpenThreadRef
+// static method
+OpenThreadPool OpenThread::DefaultPool_;
 bool OpenThread::Init(size_t capacity, bool profile)
 {
-    return Instance_.init(capacity, profile);
+    return DefaultPool_.init(capacity, profile);
 }
 
 OpenThreadRef OpenThread::Create(const std::string& name)
 {
     OpenThreadRef ref;
-    if (name.empty())
-    {
-        assert(false);
-        return ref;
-    }
-    if (!Instance_.isInit_)
-    {
-        if (!Instance_.checkInit())
-        {
-            if (!Instance_.init(256, true))
-            {
-                return ref;
-            }
-        }
-    }
-    ref.thread_ = Instance_.safeMap_[name];
-    if (!ref)
-    {
-        Instance_.lock();
-        ref.thread_ = Instance_.safeMap_[name];
-        if (!ref)
-        {
-            if (!Instance_.safeMap_.isFull())
-            {
-                ref.thread_ = std::shared_ptr<OpenThread>(new OpenThread(name));
-                if (!Instance_.safeMap_.set(ref.thread_))
-                {
-                    Instance_.unlock();
-                    return ref;
-                }
-            }
-            ref.thread_ = Instance_.safeMap_[name];
-        }
-        Instance_.unlock();
-    }
-    else
-    {
-        assert(ref.name() == name);
-    }
+    ref.thread_ = DefaultPool_.create(name);
     return ref;
 }
 
 OpenThreadRef OpenThread::Create(const std::string& name, void (*cb)(const Msg&))
 {
-    auto threadRef = OpenThread::Create(name);
-    if (threadRef && cb)
-    {
-        if (!threadRef.isRunning())
-        {
-            threadRef.start(cb);
-        }
-        else
-        {
-            assert(threadRef.thread_->cb_ == cb);
-        }
-    }
-    return threadRef;
+    OpenThreadRef ref;
+    ref.thread_ = DefaultPool_.create(name, cb);
+    return ref;
 }
 
 OpenThreadRef OpenThread::Thread(int pid)
 {
     OpenThreadRef ref;
-    if (pid < 0 || pid >= GetThreadCapacity())
-    {
-        return ref;
-    }
-    if (!Instance_.isInit_)
-    {
-        if (!Instance_.checkInit()) return ref;
-    }
-    ref.thread_ = Instance_.safeMap_[pid];
-    if (ref)
-    {
-        assert(ref.pid() == pid);
-    }
+    ref.thread_ = DefaultPool_.thread(pid);
     return ref;
 }
 
 OpenThreadRef OpenThread::Thread(const std::string& name)
 {
     OpenThreadRef ref;
-    if (!Instance_.isInit_)
-    {
-        if (!Instance_.checkInit()) return ref;
-    }
-    ref.thread_ = Instance_.safeMap_[name];
-    if (ref)
-    {
-        assert(ref.name() == name);
-    }
+    ref.thread_ = DefaultPool_.thread(name);
     return ref;
 }
 
 const std::string& OpenThread::ThreadName(int pid)
 {
-    static std::string emtpyString;
-    if (pid < 0 || pid >= GetThreadCapacity())
-    {
-        return emtpyString;
-    }
-    if (!Instance_.isInit_)
-    {
-        if (!Instance_.checkInit()) return emtpyString;
-    }
-    std::shared_ptr<OpenThread> thread = Instance_.safeMap_[pid];
-    if (thread)
-    {
-        assert(thread->pid() == pid);
-        return thread->name();
-    }
-    return emtpyString;
+    return DefaultPool_.threadName(pid);
 }
 
 int OpenThread::ThreadId(const std::string& name)
 {
-    if (!Instance_.isInit_)
-    {
-        if (!Instance_.checkInit()) return -1;
-    }
-    std::shared_ptr<OpenThread> thread = Instance_.safeMap_[name];
-    if (thread)
-    {
-        assert(thread->name() == name);
-        return thread->pid();
-    }
-    return -1;
+    return DefaultPool_.threadId(name);
 }
 
 size_t OpenThread::GetThreadCapacity()
 {
-    return Instance_.capacity();
+    return DefaultPool_.capacity();
 }
 
 size_t OpenThread::GetThreadSize()
 {
-    return Instance_.size();
+    return DefaultPool_.size();
 }
 
 bool OpenThread::Send(int pid, const std::shared_ptr<void>& data)
 {
-    if (pid < 0 || pid >= GetThreadCapacity())
-    {
-        return false;
-    }
-    if (!Instance_.isInit_)
-    {
-        if (!Instance_.checkInit()) return false;
-    }
-    std::shared_ptr<OpenThread> sptr = Instance_.safeMap_[pid];
-    if (sptr && sptr->isRunning())
-    {
-        assert(sptr->pid() == pid);
-        return sptr->send(data);
-    }
-    return false;
+    return  DefaultPool_.send(pid, data);
 }
 
 bool OpenThread::Send(const std::string& name, const std::shared_ptr<void>& data)
 {
-    if (!Instance_.isInit_)
-    {
-        if (!Instance_.checkInit()) return false;
-    }
-    std::shared_ptr<OpenThread> sptr = Instance_.safeMap_[name];
-    if (sptr && sptr->isRunning())
-    {
-        assert(sptr->name() == name);
-        return sptr->send(data);
-    }
-    return false;
+    return  DefaultPool_.send(name, data);
 }
 
 bool OpenThread::Send(const std::vector<int>& vectPid, const std::shared_ptr<void>& data)
 {
-    if (!Instance_.isInit_)
-    {
-        if (!Instance_.checkInit()) return false;
-    }
-    std::shared_ptr<OpenThread> sptr;
-    bool ret = true;
-    for (size_t i = 0; i < vectPid.size(); i++)
-    {
-        sptr = Instance_.safeMap_[vectPid[i]];
-        if (sptr && sptr->isRunning())
-        {
-            assert(sptr->pid() == vectPid[i]);
-            ret = sptr->send(data) && ret;
-        }
-    }
-    return ret;
+    return  DefaultPool_.send(vectPid, data);
 }
 
 bool OpenThread::Send(const std::vector<std::string>& vectName, const std::shared_ptr<void>& data)
 {
-    if (!Instance_.isInit_)
-    {
-        if (!Instance_.checkInit()) return false;
-    }
-    std::shared_ptr<OpenThread> sptr;
-    bool ret = true;
-    for (size_t i = 0; i < vectName.size(); i++)
-    {
-        sptr = Instance_.safeMap_[vectName[i]];
-        if (sptr && sptr->isRunning())
-        {
-            assert(sptr->name() == vectName[i]);
-            ret = sptr->send(data) && ret;
-        }
-    }
-    return ret;
+    return  DefaultPool_.send(vectName, data);
 }
 
 bool OpenThread::Stop(int pid)
 {
-    if (pid < 0 || pid >= GetThreadCapacity())
-    {
-        return false;
-    }
-    if (!Instance_.isInit_)
-    {
-        if (!Instance_.checkInit()) return false;
-    }
-    std::shared_ptr<OpenThread> sptr = Instance_.safeMap_[pid];
-    if (sptr && sptr->isRunning())
-    {
-        assert(sptr->pid() == pid);
-        sptr->stop();
-    }
-    return true;
+    return  DefaultPool_.stop(pid);
 }
 
 bool OpenThread::Stop(const std::string& name)
 {
-    if (!Instance_.isInit_)
-    {
-        if (!Instance_.checkInit()) return false;
-    }
-    std::shared_ptr<OpenThread> sptr = Instance_.safeMap_[name];
-    if (sptr && sptr->isRunning())
-    {
-        assert(sptr->name() == name);
-        sptr->stop();
-    }
-    return true;
+    return  DefaultPool_.stop(name);
 }
 
 void OpenThread::StopAll()
 {
-    Instance_.stop();
+    DefaultPool_.stopAll();
 }
 
 std::shared_ptr<OpenThread> OpenThread::GetThread(OpenThreadRef& ref)
@@ -660,66 +513,186 @@ std::shared_ptr<OpenThread> OpenThread::GetThread(OpenThreadRef& ref)
 
 void OpenThread::ThreadJoin(OpenThreadRef& ref)
 {
-    if (ref && ref.isRunning())
-    {
-        pthread_join(ref.thread_->threadId_, NULL);
-    }
+    DefaultPool_.threadJoin(ref.thread_);
 }
 
 void OpenThread::ThreadJoin(const std::vector<int>& vectPid)
 {
-    if (!Instance_.isInit_)
-    {
-        if (!Instance_.checkInit()) return;
-    }
-    std::shared_ptr<OpenThread> sptr;
-    for (size_t i = 0; i < vectPid.size(); i++)
-    {
-        sptr = Instance_.safeMap_[vectPid[i]];
-        if (!sptr) continue;
-        if (sptr->isRunning())
-        {
-            pthread_join(sptr->threadId_, NULL);
-        }
-    }
+    DefaultPool_.threadJoin(vectPid);
 }
 
 void OpenThread::ThreadJoin(const std::vector<std::string>& vectName)
 {
-    if (!Instance_.isInit_)
-    {
-        if (!Instance_.checkInit()) return;
-    }
-    std::shared_ptr<OpenThread> sptr;
-    for (size_t i = 0; i < vectName.size(); i++)
-    {
-        sptr = Instance_.safeMap_[vectName[i]];
-        if (!sptr) continue;
-        if (sptr->isRunning())
-        {
-            pthread_join(sptr->threadId_, NULL);
-        }
-    }
+    DefaultPool_.threadJoin(vectName);
 }
 
 void OpenThread::ThreadJoinAll()
 {
-    size_t size = Instance_.safeMap_.capacity();
-    std::shared_ptr<OpenThread> sptr;
-    for (size_t i = 0; i < size; i++)
+    DefaultPool_.threadJoinAll();
+}
+
+
+// SafeMap
+OpenThreadPool::SafeMap::SafeMap()
+    :capacity_(0)
+{
+}
+
+OpenThreadPool::SafeMap::SafeMap(const SafeMap& that)
+    :capacity_(0)
+{
+    assert(false);
+}
+
+OpenThreadPool::SafeMap::SafeMap(size_t capacity)
+    :capacity_(0)
+{
+    setCapacity(capacity);
+}
+
+OpenThreadPool::SafeMap::~SafeMap()
+{
+}
+
+void OpenThreadPool::SafeMap::setCapacity(size_t capacity)
+{
+    if (capacity_ > 0)
     {
-        sptr = Instance_.safeMap_[i];
-        if (!sptr) continue;
-        if (sptr->isRunning())
+        assert(false);
+        return;
+    }
+    capacity_ = capacity;
+    vectKeys_.resize(capacity, std::shared_ptr<const std::string>());
+    vectValues_.resize(capacity, std::shared_ptr<OpenThread>());
+}
+
+bool OpenThreadPool::SafeMap::isFull()
+{
+    for (size_t i = 0; i < vectKeys_.size(); i++)
+    {
+        if (!vectKeys_[i]) return false;
+    }
+    return true;
+}
+
+size_t OpenThreadPool::SafeMap::size()
+{
+    for (size_t i = 0; i < vectKeys_.size(); i++)
+    {
+        if (!vectKeys_[i]) return i;
+    }
+    return vectKeys_.size();
+}
+
+std::shared_ptr<OpenThread> OpenThreadPool::SafeMap::operator[](size_t pid)
+{
+    assert(capacity_ == vectKeys_.size());
+    assert(vectValues_.size() == vectKeys_.size());
+    std::shared_ptr<OpenThread> ret;
+    if (pid < vectValues_.size())
+    {
+        ret = vectValues_[pid];
+    }
+    if (ret)
+    {
+        assert(ret->pid() == pid);
+    }
+    return ret;
+}
+
+std::shared_ptr<OpenThread> OpenThreadPool::SafeMap::operator[](const std::string& name)
+{
+    assert(capacity_ == vectKeys_.size());
+    assert(vectValues_.size() == vectKeys_.size());
+    size_t i = 0;
+    std::shared_ptr<const std::string> sptrKey;
+    std::shared_ptr<OpenThread> ret;
+    for (; i < vectKeys_.size(); i++)
+    {
+        sptrKey = vectKeys_[i];
+        if (!sptrKey)  break;
+        if (sptrKey->compare(name) == 0)
         {
-            pthread_join(sptr->threadId_, NULL);
+            ret = vectValues_[i];
+            if (ret)
+            {
+                assert(ret->pid() == i);
+            }
+            break;
         }
+    }
+    return ret;
+}
+
+int OpenThreadPool::SafeMap::set(std::shared_ptr<OpenThread>& value)
+{
+    if (!value) return -1;
+    if (value->pid() != -1) return -1;
+    assert(capacity_ == vectKeys_.size());
+    assert(vectValues_.size() == vectKeys_.size());
+    std::shared_ptr<const std::string> sptrKey;
+    int pid = -1;
+    std::string name = value->name();
+    for (int i = 0; i < (int)vectKeys_.size(); i++)
+    {
+        sptrKey = vectKeys_[i];
+        if (!sptrKey)
+        {
+            pid = i;
+            vectValues_[pid] = value;
+            vectKeys_[pid] = std::shared_ptr<const std::string>(new const std::string(name));
+            break;
+        }
+        if (sptrKey->compare(name) == 0)
+        {
+            pid = i;
+            vectValues_[pid] = value;
+            break;
+        }
+    }
+    if (pid != -1 && value)
+    {
+        value->pid_ = pid;
+    }
+    return pid;
+}
+
+void OpenThreadPool::SafeMap::clear()
+{
+    assert(capacity_ == vectKeys_.size());
+    assert(vectValues_.size() == vectKeys_.size());
+    for (size_t i = 0; i < vectKeys_.size(); ++i)
+    {
+        vectKeys_[i].reset();
+        vectValues_[i].reset();
     }
 }
 
-OpenThread::ThreadInstance OpenThread::Instance_;
+// OpenThreadPool
+OpenThreadPool::OpenThreadPool()
+    :profile_(false),
+    isInit_(false),
+    isClearIng_(false)
+{
+    pthread_mutex_init(&mutex_, NULL);
+}
 
-bool OpenThread::ThreadInstance::init(size_t capacity, bool profile)
+OpenThreadPool::~OpenThreadPool()
+{
+    pthread_mutex_destroy(&mutex_);
+}
+
+void OpenThreadPool::lock()
+{
+    pthread_mutex_lock(&mutex_);
+}
+
+void OpenThreadPool::unlock()
+{
+    pthread_mutex_unlock(&mutex_);
+}
+
+bool OpenThreadPool::init(size_t capacity, bool profile)
 {
     lock();
     if (isClearIng_)
@@ -740,7 +713,7 @@ bool OpenThread::ThreadInstance::init(size_t capacity, bool profile)
     return true;
 }
 
-size_t OpenThread::ThreadInstance::size()
+size_t OpenThreadPool::size()
 {
     lock();
     if (isClearIng_)
@@ -751,15 +724,21 @@ size_t OpenThread::ThreadInstance::size()
     if (!isInit_)
     {
         unlock();
-        assert(false);
-        return 0;
+        if (!checkInit())
+        {
+            if (!init(256, true))
+            {
+                return 0;
+            }
+        }
+        lock();
     }
     size_t size = safeMap_.size();
     unlock();
     return size;
 }
 
-size_t OpenThread::ThreadInstance::capacity()
+size_t OpenThreadPool::capacity()
 {
     lock();
     if (isClearIng_)
@@ -770,15 +749,21 @@ size_t OpenThread::ThreadInstance::capacity()
     if (!isInit_)
     {
         unlock();
-        assert(false);
-        return 0;
+        if (!checkInit())
+        {
+            if (!init(256, true))
+            {
+                return 0;
+            }
+        }
+        lock();
     }
     size_t cap = safeMap_.capacity();
     unlock();
     return cap;
 }
 
-bool OpenThread::ThreadInstance::checkInit()
+bool OpenThreadPool::checkInit()
 {
     lock();
     if (isClearIng_)
@@ -795,7 +780,7 @@ bool OpenThread::ThreadInstance::checkInit()
     return true;
 }
 
-void OpenThread::ThreadInstance::stop()
+void OpenThreadPool::stopAll()
 {
     lock();
     isClearIng_ = true;
@@ -837,209 +822,320 @@ void OpenThread::ThreadInstance::stop()
     unlock();
 }
 
-// SafeMap
-OpenThread::SafeMap::SafeMap()
-    :capacity_(0)
+std::shared_ptr<OpenThread> OpenThreadPool::create(const std::string& name)
 {
-}
-
-OpenThread::SafeMap::SafeMap(size_t capacity)
-    :capacity_(0)
-{
-    setCapacity(capacity);
-}
-
-OpenThread::SafeMap::~SafeMap()
-{
-}
-
-void OpenThread::SafeMap::setCapacity(size_t capacity)
-{
-    if (capacity_ > 0)
+    std::shared_ptr<OpenThread> sptr;
+    if (name.empty())
     {
         assert(false);
-        return;
+        return sptr;
     }
-    capacity_ = capacity;
-    vectKeys_.resize(capacity, std::shared_ptr<const std::string>());
-    vectValues_.resize(capacity, std::shared_ptr<OpenThread>());
+    if (!isInit_)
+    {
+        if (!checkInit())
+        {
+            if (!init(256, true))
+            {
+                return sptr;
+            }
+        }
+    }
+    sptr = safeMap_[name];
+    if (!sptr)
+    {
+        lock();
+        sptr = safeMap_[name];
+        if (!sptr)
+        {
+            if (!safeMap_.isFull())
+            {
+                sptr = std::shared_ptr<OpenThread>(new OpenThread(name));
+                sptr->pool_ = this;
+                if (!safeMap_.set(sptr))
+                {
+                    unlock();
+                    return sptr;
+                }
+            }
+            sptr = safeMap_[name];
+        }
+        unlock();
+    }
+    else
+    {
+        assert(sptr->name() == name);
+    }
+    return sptr;
 }
 
-bool OpenThread::SafeMap::isFull()
+std::shared_ptr<OpenThread> OpenThreadPool::create(const std::string& name, void (*cb)(const OpenThread::Msg&))
 {
-    for (size_t i = 0; i < vectKeys_.size(); i++)
+    std::shared_ptr<OpenThread> sptr = create(name);
+    if (sptr && cb)
     {
-        if (!vectKeys_[i]) return false;
+        if (!sptr->isRunning())
+        {
+            sptr->start(cb);
+        }
+        else
+        {
+            assert(sptr->cb_ == cb);
+        }
+    }
+    return sptr;
+}
+
+std::shared_ptr<OpenThread> OpenThreadPool::thread(int pid)
+{
+    std::shared_ptr<OpenThread> sptr;
+    if (pid < 0 || pid >= capacity())
+    {
+        return sptr;
+    }
+    if (!isInit_)
+    {
+        if (!checkInit()) return sptr;
+    }
+    sptr = safeMap_[pid];
+    if (sptr)
+    {
+        assert(sptr->pid() == pid);
+        assert(sptr->pool_ == this);
+    }
+    return sptr;
+}
+
+std::shared_ptr<OpenThread> OpenThreadPool::thread(const std::string& name)
+{
+    std::shared_ptr<OpenThread> sptr;
+    if (!isInit_)
+    {
+        if (!checkInit()) return sptr;
+    }
+    sptr = safeMap_[name];
+    if (sptr)
+    {
+        assert(sptr->name() == name);
+        assert(sptr->pool_ == this);
+    }
+    return sptr;
+}
+
+const std::string& OpenThreadPool::threadName(int pid)
+{
+    static std::string emtpyString;
+    if (pid < 0 || pid >= capacity())
+    {
+        return emtpyString;
+    }
+    if (!isInit_)
+    {
+        if (!checkInit()) return emtpyString;
+    }
+    std::shared_ptr<OpenThread> sptr = safeMap_[pid];
+    if (sptr)
+    {
+        assert(sptr->pool_ == this);
+        assert(sptr->pid() == pid);
+        return sptr->name();
+    }
+    return emtpyString;
+}
+
+int OpenThreadPool::threadId(const std::string& name)
+{
+    if (!isInit_)
+    {
+        if (!checkInit()) return -1;
+    }
+    std::shared_ptr<OpenThread> sptr = safeMap_[name];
+    if (sptr)
+    {
+        assert(sptr->pool_ == this);
+        assert(sptr->name() == name);
+        return sptr->pid();
+    }
+    return -1;
+}
+
+bool OpenThreadPool::send(int pid, const std::shared_ptr<void>& data)
+{
+    if (pid < 0 || pid >= capacity())
+    {
+        return false;
+    }
+    if (!isInit_)
+    {
+        if (!checkInit()) return false;
+    }
+    std::shared_ptr<OpenThread> sptr = safeMap_[pid];
+    if (sptr && sptr->isRunning())
+    {
+        assert(sptr->pool_ == this);
+        assert(sptr->pid() == pid);
+        return sptr->send(data);
+    }
+    return false;
+}
+
+bool OpenThreadPool::send(const std::string& name, const std::shared_ptr<void>& data)
+{
+    if (!isInit_)
+    {
+        if (!checkInit()) return false;
+    }
+    std::shared_ptr<OpenThread> sptr = safeMap_[name];
+    if (sptr && sptr->isRunning())
+    {
+        assert(sptr->pool_ == this);
+        assert(sptr->name() == name);
+        return sptr->send(data);
+    }
+    return false;
+}
+
+bool OpenThreadPool::send(const std::vector<int>& vectPid, const std::shared_ptr<void>& data)
+{
+    if (!isInit_)
+    {
+        if (!checkInit()) return false;
+    }
+    std::shared_ptr<OpenThread> sptr;
+    bool ret = true;
+    for (size_t i = 0; i < vectPid.size(); i++)
+    {
+        sptr = safeMap_[vectPid[i]];
+        if (sptr && sptr->isRunning())
+        {
+            assert(sptr->pool_ == this);
+            assert(sptr->pid() == vectPid[i]);
+            ret = sptr->send(data) && ret;
+        }
+    }
+    return ret;
+}
+
+bool OpenThreadPool::send(const std::vector<std::string>& vectName, const std::shared_ptr<void>& data)
+{
+    if (!isInit_)
+    {
+        if (!checkInit()) return false;
+    }
+    std::shared_ptr<OpenThread> sptr;
+    bool ret = true;
+    for (size_t i = 0; i < vectName.size(); i++)
+    {
+        sptr = safeMap_[vectName[i]];
+        if (sptr && sptr->isRunning())
+        {
+            assert(sptr->pool_ == this);
+            assert(sptr->name() == vectName[i]);
+            ret = sptr->send(data) && ret;
+        }
+    }
+    return ret;
+}
+
+bool OpenThreadPool::stop(int pid)
+{
+    if (pid < 0 || pid >= capacity())
+    {
+        return false;
+    }
+    if (!isInit_)
+    {
+        if (!checkInit()) return false;
+    }
+    std::shared_ptr<OpenThread> sptr = safeMap_[pid];
+    if (sptr && sptr->isRunning())
+    {
+        assert(sptr->pool_ == this);
+        assert(sptr->pid() == pid);
+        sptr->stop();
     }
     return true;
 }
 
-size_t OpenThread::SafeMap::size()
+bool OpenThreadPool::stop(const std::string& name)
 {
-    for (size_t i = 0; i < vectKeys_.size(); i++)
+    if (!isInit_)
     {
-        if (!vectKeys_[i]) return i;
+        if (!checkInit()) return false;
     }
-    return vectKeys_.size();
+    std::shared_ptr<OpenThread> sptr = safeMap_[name];
+    if (sptr && sptr->isRunning())
+    {
+        assert(sptr->pool_ == this);
+        assert(sptr->name() == name);
+        sptr->stop();
+    }
+    return true;
 }
 
-std::shared_ptr<OpenThread> OpenThread::SafeMap::operator[](size_t pid)
+void OpenThreadPool::threadJoin(const std::shared_ptr<OpenThread>& sptr)
 {
-    assert(capacity_ == vectKeys_.size());
-    assert(vectValues_.size() == vectKeys_.size());
-    std::shared_ptr<OpenThread> ret;
-    if (pid < vectValues_.size())
+    if (sptr && sptr->isRunning())
     {
-        ret = vectValues_[pid];
+        pthread_join(sptr->threadId_, NULL);
     }
-    if (ret)
-    {
-        assert(ret->pid() == pid);
-    }
-    return ret;
 }
 
-std::shared_ptr<OpenThread> OpenThread::SafeMap::operator[](const std::string& name)
+void OpenThreadPool::threadJoin(const std::vector<int>& vectPid)
 {
-    assert(capacity_ == vectKeys_.size());
-    assert(vectValues_.size() == vectKeys_.size());
-    size_t i = 0;
-    std::shared_ptr<const std::string> sptrKey;
-    std::shared_ptr<OpenThread> ret;
-    for (; i < vectKeys_.size(); i++)
+    if (!isInit_)
     {
-        sptrKey = vectKeys_[i];
-        if (!sptrKey)  break;
-        if (sptrKey->compare(name) == 0)
+        if (!checkInit()) return;
+    }
+    std::shared_ptr<OpenThread> sptr;
+    for (size_t i = 0; i < vectPid.size(); i++)
+    {
+        sptr = safeMap_[vectPid[i]];
+        if (!sptr) continue;
+        if (sptr->isRunning())
         {
-            ret = vectValues_[i];
-            if (ret)
-            {
-                assert(ret->pid() == i);
-            }
-            break;
+            assert(sptr->pool_ == this);
+            assert(sptr->pid() == vectPid[i]);
+            pthread_join(sptr->threadId_, NULL);
         }
     }
-    return ret;
 }
 
-int OpenThread::SafeMap::set(std::shared_ptr<OpenThread>& value)
+void OpenThreadPool::threadJoin(const std::vector<std::string>& vectName)
 {
-    if (!value) return -1;
-    if (value->pid() != -1) return -1;
-    assert(capacity_ == vectKeys_.size());
-    assert(vectValues_.size() == vectKeys_.size());
-    std::shared_ptr<const std::string> sptrKey;
-    int pid = -1;
-    std::string name = value->name();
-    for (int i = 0; i < (int)vectKeys_.size(); i++)
+    if (!isInit_)
     {
-        sptrKey = vectKeys_[i];
-        if (!sptrKey)
+        if (!checkInit()) return;
+    }
+    std::shared_ptr<OpenThread> sptr;
+    for (size_t i = 0; i < vectName.size(); i++)
+    {
+        sptr = safeMap_[vectName[i]];
+        if (!sptr) continue;
+        if (sptr->isRunning())
         {
-            pid = i;
-            vectValues_[pid] = value;
-            vectKeys_[pid] = std::shared_ptr<const std::string>(new const std::string(name));
-            break;
-        }
-        if (sptrKey->compare(name) == 0)
-        {
-            pid = i;
-            vectValues_[pid] = value;
-            break;
+            assert(sptr->pool_ == this);
+            assert(sptr->name() == vectName[i]);
+            pthread_join(sptr->threadId_, NULL);
         }
     }
-    if (pid != -1 && value)
+}
+void OpenThreadPool::threadJoinAll()
+{
+    size_t size = safeMap_.capacity();
+    std::shared_ptr<OpenThread> sptr;
+    for (size_t i = 0; i < size; i++)
     {
-        value->pid_ = pid;
-    }
-    return pid;
-}
-
-void OpenThread::SafeMap::clear()
-{
-    assert(capacity_ == vectKeys_.size());
-    assert(vectValues_.size() == vectKeys_.size());
-    for (size_t i = 0; i < vectKeys_.size(); ++i)
-    {
-        vectKeys_[i].reset();
-        vectValues_[i].reset();
+        sptr = safeMap_[i];
+        if (!sptr) continue;
+        if (sptr->isRunning())
+        {
+            assert(sptr->pool_ == this);
+            assert(sptr->pid() == i);
+            pthread_join(sptr->threadId_, NULL);
+        }
     }
 }
 
-void OpenThread::Sleep(int64_t milliSecond)
-{
-#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
-    ::Sleep((DWORD)milliSecond);
-#else
-    ::usleep(milliSecond * 1000);
-#endif
-}
-
-int64_t OpenThread::MilliUnixtime()
-{
-#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
-    int64_t ft = 0;
-    ::GetSystemTimeAsFileTime((LPFILETIME)&ft);
-    int64_t milliSecond = (ft / 10000000 - 11644473600LL) * 1000 + (ft / 10) % 1000000;
-    return milliSecond;
-#else
-    struct timeval tv;
-    ::gettimeofday(&tv, NULL);
-    int64_t milliSecond = tv.tv_sec * 1000 + tv.tv_usec;
-    return milliSecond;
-#endif
-}
-
-int64_t OpenThread::ThreadTime()
-{
-#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
-    int64_t ft = 0;
-    ::GetSystemTimeAsFileTime((LPFILETIME)&ft);
-    int64_t tt = (ft / 10000000 - 11644473600LL) * 1000000 + (ft / 10) % 1000000000;
-#else
-#define NANOSEC 1000000000
-#define MICROSEC 1000000
-#if  !defined(__APPLE__) || defined(AVAILABLE_MAC_OS_X_VERSION_10_12_AND_LATER)
-    struct timespec ti;
-    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ti);
-    int64_t tt = ti.tv_sec * MICROSEC + ti.tv_nsec / (NANOSEC / MICROSEC);
-#else
-    struct task_thread_times_info aTaskInfo;
-    mach_msg_type_number_t aTaskInfoCount = TASK_THREAD_TIMES_INFO_COUNT;
-    if (KERN_SUCCESS != task_info(mach_task_self(), TASK_THREAD_TIMES_INFO, (task_info_t)&aTaskInfo, &aTaskInfoCount)) {
-        return 0;
-    }
-    int64_t tt = aTaskInfo.user_time.seconds * MICROSEC + aTaskInfo.user_time.microseconds;
-#endif
-#endif
-    return tt;
-}
-
-
-// ThreadInstance
-OpenThread::ThreadInstance::ThreadInstance()
-    :profile_(false),
-    isInit_(false),
-    isClearIng_(false)
-{
-    pthread_mutex_init(&mutex_, NULL);
-}
-
-OpenThread::ThreadInstance::~ThreadInstance()
-{
-    pthread_mutex_destroy(&mutex_);
-}
-
-void OpenThread::ThreadInstance::lock()
-{
-    pthread_mutex_lock(&mutex_);
-}
-
-void OpenThread::ThreadInstance::unlock()
-{
-    pthread_mutex_unlock(&mutex_);
-}
 
 // OpenThreadRef
 bool OpenThreadRef::start(void (*cb)(OpenThreadMsg&))
@@ -1113,13 +1209,21 @@ OpenSync::OpenSyncRef::OpenSyncRef()
     pthread_cond_init(&cond_, NULL);
 }
 
+OpenSync::OpenSyncRef::OpenSyncRef(const OpenSyncRef& that)
+{
+    assert(false);
+    isSleep_ = that.isSleep_;
+    pthread_mutex_init(&mutex_, NULL);
+    pthread_cond_init(&cond_, NULL);
+}
+
 OpenSync::OpenSyncRef::~OpenSyncRef()
 {
     pthread_mutex_destroy(&mutex_);
     pthread_cond_destroy(&cond_);
 }
 
-bool OpenSync::OpenSyncRef::sleep()
+bool OpenSync::OpenSyncRef::await()
 {
     if (!isSleep_)
     {
@@ -1148,11 +1252,61 @@ bool OpenSync::OpenSyncRef::wakeup(const std::shared_ptr<void>& data)
     if (isSleep_)
     {
         isSleep_ = 0;
-        data_ = data;
+        destData_ = data;
         pthread_cond_signal(&cond_);
         return true;
     }
     return false;
+}
+
+
+void OpenThread::Sleep(int64_t milliSecond)
+{
+#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
+    ::Sleep((DWORD)milliSecond);
+#else
+    ::usleep(milliSecond * 1000);
+#endif
+}
+
+int64_t OpenThread::MilliUnixtime()
+{
+#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
+    int64_t ft = 0;
+    ::GetSystemTimeAsFileTime((LPFILETIME)&ft);
+    int64_t milliSecond = (ft / 10000000 - 11644473600LL) * 1000 + (ft / 10) % 1000000;
+    return milliSecond;
+#else
+    struct timeval tv;
+    ::gettimeofday(&tv, NULL);
+    int64_t milliSecond = tv.tv_sec * 1000 + tv.tv_usec;
+    return milliSecond;
+#endif
+}
+
+int64_t OpenThread::ThreadTime()
+{
+#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
+    int64_t ft = 0;
+    ::GetSystemTimeAsFileTime((LPFILETIME)&ft);
+    int64_t tt = (ft / 10000000 - 11644473600LL) * 1000000 + (ft / 10) % 1000000000;
+#else
+#define NANOSEC 1000000000
+#define MICROSEC 1000000
+#if  !defined(__APPLE__) || defined(AVAILABLE_MAC_OS_X_VERSION_10_12_AND_LATER)
+    struct timespec ti;
+    clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ti);
+    int64_t tt = ti.tv_sec * MICROSEC + ti.tv_nsec / (NANOSEC / MICROSEC);
+#else
+    struct task_thread_times_info aTaskInfo;
+    mach_msg_type_number_t aTaskInfoCount = TASK_THREAD_TIMES_INFO_COUNT;
+    if (KERN_SUCCESS != task_info(mach_task_self(), TASK_THREAD_TIMES_INFO, (task_info_t)&aTaskInfo, &aTaskInfoCount)) {
+        return 0;
+    }
+    int64_t tt = aTaskInfo.user_time.seconds * MICROSEC + aTaskInfo.user_time.microseconds;
+#endif
+#endif
+    return tt;
 }
 
 };
