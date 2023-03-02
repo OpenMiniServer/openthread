@@ -1,5 +1,5 @@
 # OpenThread
-OpenThread是世界上最舒心的跨平台多线程并发库。
+OpenThread是最舒心的跨平台多线程并发库。
 使用优雅的方式，创建线程、管理线程和线程间通信，从而实现多核并发。
 OpenThread无任何依赖，全平台设计，只有两个源文件，让小白都可以轻松玩转C++多线程开发。
 OpenLinyou系列项目：https://github.com/openlinyou
