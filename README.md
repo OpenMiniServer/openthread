@@ -1,4 +1,5 @@
 # OpenThread
+Cross-platform multi-threaded design!
 OpenThread is the most comfortable cross-platform multi-threaded concurrent library. 
 
 Using elegant methods to create threads, manage threads and communicate between threads to achieve multi-core concurrency. 
