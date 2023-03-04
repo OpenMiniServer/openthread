@@ -50,12 +50,12 @@ public:
     Worker(const std::string& name)
         :OpenThreader(name)
     {
+        mapKeyFunc_["msg_from_main"] = { (Handle)&Worker::msg_from_main };
     }
     virtual ~Worker() {}
-    virtual void start()
+    virtual bool start()
     {
-        mapKeyFunc_["msg_from_main"] = { (Handle)&Worker::msg_from_main };
-        OpenThreader::start();
+        return OpenThreader::start();
     }
 
     void msg_from_main(const Data& data)

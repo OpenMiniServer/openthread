@@ -230,7 +230,7 @@ class OpenThreader
 public:
     OpenThreader(const std::string& name) :name_(name), pid_(-1) {}
     virtual ~OpenThreader(){ stop(); }
-    virtual void start();
+    virtual bool start();
     virtual void stop();
     virtual void onStart() { }
     virtual void onMsg(OpenThreadMsg& msg) { }

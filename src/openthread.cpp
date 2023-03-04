@@ -542,10 +542,15 @@ void OpenThread::ThreadJoinAll()
 }
 
 //OpenThreader
-void OpenThreader::start()
+bool OpenThreader::start()
 {
     auto threadRef = OpenThread::Thread(name_);
-    assert(!threadRef);
+    if (threadRef)
+    {
+        printf("OpenThreader::start. [%s] is exist\n", name_.c_str());
+        assert(false);
+        return false;
+    }
     threadRef = OpenThread::Create(name_);
     assert(threadRef);
     pid_ = -1;
@@ -556,7 +561,9 @@ void OpenThreader::start()
         assert(!thread_->isRunning());
         thread_->setCustom(this);
         thread_->start(OpenThreader::Thread);
+        return true;
     }
+    return false;
 }
 void OpenThreader::stop()
 {
