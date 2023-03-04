@@ -152,8 +152,11 @@ OpenThread::OpenThread(const std::string& name)
 {
     cb_ = 0;
     pid_ = -1;
-    leftCount_ = 0;
+    leftCount_  = 0;
     totalCount_ = 0;
+    cpuCost_   = 0;
+    cpuStart_  = 0;
+
     isIdle_ = false;
     custom_ = 0;
     memset(&threadId_, 0, sizeof(threadId_));
@@ -170,6 +173,8 @@ OpenThread::OpenThread(const OpenThread&)
     pid_ = -1;
     leftCount_ = 0;
     totalCount_ = 0;
+    cpuCost_ = 0;
+    cpuStart_ = 0;
     isIdle_ = false;
     custom_ = 0;
     memset(&threadId_, 0, sizeof(threadId_));
@@ -228,6 +233,10 @@ bool OpenThread::start(void (*cb)(const Msg&))
     readId_ = 0;
     leftCount_ = 0;
     totalCount_ = 0;
+
+    cpuCost_ = 0;
+    cpuStart_ = 0;
+
     memset(&threadId_, 0, sizeof(threadId_));
     std::shared_ptr<OpenThread>* ptr = new std::shared_ptr<OpenThread>(ref.thread_);
     int ret = pthread_create(&threadId_, NULL, (void* (*)(void*))OpenThread::Run, ptr);
