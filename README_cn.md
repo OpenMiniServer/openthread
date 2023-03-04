@@ -396,13 +396,12 @@ using namespace open;
 //假设是谷歌protobuff对象
 struct ProtoBuffer
 {
-	//父类虚函数
     virtual ~ProtoBuffer() {}
 };
-//Worker类通信的中间数据结构
+
 class Data
 {
-    ProtoBuffer* proto_; //携带的数据
+    ProtoBuffer* proto_;
 public:
     Data() :proto_(0), srcPid_(-1) {}
     Data(int pid, const std::string& name, const std::string& key, ProtoBuffer* proto)
@@ -412,9 +411,9 @@ public:
         if (proto_) delete proto_;
         proto_ = 0;
     }
-    int srcPid_; //发送方的worker的ID
-    std::string rpc_; //路由函数名称
-    std::string srcName_; //发送方的worker名称
+    int srcPid_;
+    std::string rpc_;
+    std::string srcName_;
     template <class T>
     const T& proto() const 
     {
@@ -431,54 +430,25 @@ struct Rpc
 {
     Handle handle_;
 };
-class Worker
+class Worker:public OpenThreader
 {
 public:
     Worker(const std::string& name)
-        :name_(name)
-        ,sessionId_(0)
-    {
-        mapKeyFunc_["do_start"] = { (Handle)&Worker::do_start };
-    }
-    ~Worker()
-    {
-        stop();
-    }
-    void start()
-    {
-    	//查询name对应的线程，没有创建，故是null
-        auto threadRef = OpenThread::Thread(name_);
-        assert(!threadRef);
-        //创建名字为name的线程
-        threadRef = OpenThread::Create(name_);
-        assert(threadRef);
-        if (threadRef)
-        {
-        	//获取线程真实对象，以便使用其高级功能。
-        	//注意只能在该线程使用高级功能，否则会导致线程读取数据冲突
-            thread_ = OpenThread::GetThread(threadRef);
-            assert(!thread_->isRunning());
-            //只能指定一次，只能在子线程访问
-            thread_->setCustom(this);
-            //指定函数，并启动线程，
-            thread_->start(Worker::Thread);
-        }
-    }
-    //线程全部启动后，主线程发消息do_start调用
-    void do_start(const Data& data)
-    {
-        onStart();
-    }
-    //线程启动时，调用
-    virtual void onInit()
+        :OpenThreader(name)
     {
     }
-    //线程全部启动后调用，
-    virtual void onStart()
+    virtual ~Worker() {}
+    virtual void start()
+    {
+        mapKeyFunc_["msg_from_main"] = { (Handle)&Worker::msg_from_main };
+        OpenThreader::start();
+    }
+
+    void msg_from_main(const Data& data)
     {
     }
-    //本子线程收到消息后，调用此方法。
-    virtual void onMsg(const Data& data)
+
+    void onData(const Data& data)
     {
         printf("[%s]receive<<=[%s] key:%s\n", name_.c_str(), data.srcName_.c_str(), data.rpc_.c_str());
         auto iter = mapKeyFunc_.find(data.rpc_);
@@ -493,16 +463,21 @@ public:
         }
         printf("[%s]no implement key:%s\n", name_.c_str(), data.rpc_.c_str());
     }
-    // 向线程sid发送消息，该方法会调用delete释放proto,只能传一次，由std::shared_ptr管理
+    virtual void onMsg(OpenThreadMsg& msg)
+    {
+        const Data* data = msg.data<Data>();
+        if (data) onData(*data);
+    }
+    // proto will be delete
     bool send(int sid, const std::string& key, ProtoBuffer* proto)
     {
-        printf("[%s]send=>[%s] key:%s\n", name_.c_str(), WorkerName(sid).c_str(), key.c_str());
+        printf("[%s]send=>[%s] key:%s\n", name_.c_str(), ThreadName(sid).c_str(), key.c_str());
         auto data = std::shared_ptr<Data>(new Data(pid(), name_, key, proto));
         bool ret = OpenThread::Send(sid, data);
         //assert(ret);
         return ret;
     }
-    // 向线程名为name发送消息，该方法会调用delete释放proto,只能传一次，由std::shared_ptr管理
+    // proto will be delete
     bool send(const std::string& name, const std::string& key, ProtoBuffer* proto)
     {
         printf("[%s]send=>[%s] key:%s\n", name_.c_str(), name.c_str(), key.c_str());
@@ -511,7 +486,6 @@ public:
         //assert(ret);
         return ret;
     }
-    // 向多个线程sid发送消息，该方法会调用delete释放proto,只能传一次，由std::shared_ptr管理
     bool send(std::vector<int>& vectSid, const std::string& key, ProtoBuffer* proto)
     {
         printf("[%s]send=>size[%d] key:%s\n", name_.c_str(), (int)vectSid.size(), key.c_str());
@@ -520,7 +494,6 @@ public:
         //assert(ret);
         return ret;
     }
-    // 向多个线程名为name发送消息，该方法会调用delete释放proto,只能传一次，由std::shared_ptr管理
     bool send(std::vector<std::string>& vectName, const std::string& key, ProtoBuffer* proto)
     {
         printf("[%s]send=>size[%d] key:%s\n", name_.c_str(), (int)vectName.size(), key.c_str());
@@ -529,91 +502,38 @@ public:
         //assert(ret);
         return ret;
     }
-    //停止本线程
-    void stop()
+    virtual void stop()
     {
-        auto threadRef = OpenThread::Thread(name_);
-        if (threadRef)
-        {
-            assert(threadRef == thread_);
-            if (threadRef.isRunning())
-            {
-                threadRef.stop();
-                threadRef.waitStop();
-            }
-        }
-        else
-        {
-            thread_.reset();
-        }
+        OpenThreader::stop();
     }
-    //线程调出时，调用
-    virtual void onStop()
-    {
-    }
-    //本线程绑定的函数
-    static void Thread(OpenThreadMsg& msg)
-    {
-        Worker* that = msg.custom<Worker>();
-        if (!that)
-        {
-            assert(false); return;
-        }
-        switch (msg.state_)
-        {
-        case OpenThread::RUN: 
-            break;
-        case OpenThread::START:
-            that->onInit(); return;
-        case OpenThread::STOP:
-            that->onStop(); return;
-        default:
-            assert(false); return;
-        }
-        const Data* data = msg.data<Data>();
-        if (data) that->onMsg(*data);
-    }
-    //提供给主线程发消息
     static bool Send(std::vector<std::string>& vectName, const std::string& key, ProtoBuffer* proto)
     {
         printf("Send=>size[%d] key:%s\n", (int)vectName.size(), key.c_str());
         auto data = std::shared_ptr<Data>(new Data(-1, "Global", key, proto));
         bool ret = OpenThread::Send(vectName, data);
-        //assert(ret);
+        assert(ret);
         return ret;
     }
-
-    const std::string name_;
-    static inline int WorkerId(const std::string& name) { return OpenThread::ThreadId(name); }
-    static inline const std::string& WorkerName(int pid) { return OpenThread::ThreadName(pid); }
 protected:
-	//给当前线程发消息
     void sendLoop(const std::string& key)
     {
         auto proto = new ProtoBuffer;
         send(pid(), key, proto);
-    }
-    int pid()
-    {
-        OpenThread* p = thread_.get();
-        return p ? p->pid() : -1;
     }
     bool canLoop()
     {
         OpenThread* p = thread_.get();
         return p ? (p->isRunning() && !p->hasMsg()) : false;
     }
-    int sessionId_;
-    std::shared_ptr<OpenThread> thread_;
     std::unordered_map<std::string, Rpc> mapKeyFunc_;
 };
-// 模仿protobuff数据，请求定时器数据结构
+
 struct TimerEventMsg :public ProtoBuffer
 {
     int workerId_;
     int64_t deadline_;
 };
-// 模仿protobuff数据，定时器信息数据结构
+
 struct TimerInfoMsg :public ProtoBuffer
 {
     TimerInfoMsg() 
@@ -623,7 +543,7 @@ struct TimerInfoMsg :public ProtoBuffer
     int64_t cpuCost_;
     int64_t dataTime_;
 };
-//监控类，获取定时器信息，为Server做负载均衡
+
 class Inspector:public Worker
 {
     std::unordered_map<std::string, TimerInfoMsg> mapTimerInfo_;
@@ -638,7 +558,6 @@ public:
     virtual void onStart()
     {
     }
-    //向定时器获取信息
     void start_inspect(const Data& data)
     {
         std::vector<int> vectPid;
@@ -651,7 +570,7 @@ public:
         auto proto = new ProtoBuffer;
         send(vectPid, "get_timer_info", proto);
     }
-	//接收定时器的信息
+
     void return_timer_info(const Data& data)
     {
         auto& proto = data.proto<TimerInfoMsg>();
@@ -665,7 +584,6 @@ public:
             vectQueryId.clear();
         }
     }
-    //向Server提供最空闲的定时器ID
     void query_timer_info(const Data& data)
     {
         TimerInfoMsg* tmpInfo = 0;
@@ -697,11 +615,11 @@ public:
         }
     }
 };
-//定时器对象
+
+
 class Timer:public Worker
 {
     int inspectorId_;
-    //定时事件，从小到大，可以多个key。
     std::multimap<int64_t, int> mapTimerEvent;
 public:
     Timer(const std::string& name):Worker(name) 
@@ -713,9 +631,23 @@ public:
     }
     virtual void onStart()
     {
+        while (inspectorId_ < 0)
+        {
+            inspectorId_ = ThreadId("Inspector");
+            if (inspectorId_ >= 0)
+            {
+                auto proto = new TimerInfoMsg;
+                proto->workerId_ = pid();
+                proto->dataTime_ = OpenThread::MilliUnixtime();
+                proto->cpuCost_ = thread_->cpuCost();
+                proto->leftCount_ = thread_->leftCount();
+                send(inspectorId_, "return_timer_info", proto);
+                break;
+            }
+            OpenThread::Sleep(100);
+        }
         sendLoop("start_timer");
     }
-    //定时逻辑，如果触发定时就发送定时事件
     void start_timer(const Data& data)
     {
         int64_t curTime = 0;
@@ -729,7 +661,6 @@ public:
                     auto iter = mapTimerEvent.begin();
                     if (curTime > iter->first)
                     {
-                    	//触发定时，发送定时事件
                         auto proto = new TimerEventMsg;
                         proto->workerId_ = pid();
                         proto->deadline_ = curTime;
@@ -743,24 +674,10 @@ public:
                     }
                 }
             }
-            if (inspectorId_ < 0)
-            {
-            	//向监控注册，并发送自身运行信息
-                inspectorId_ = WorkerId("Inspector");
-                if (inspectorId_ >= 0)
-                {
-                    auto proto = new TimerInfoMsg;
-                    proto->workerId_ = pid();
-                    proto->dataTime_ = OpenThread::MilliUnixtime();
-                    proto->cpuCost_ = thread_->cpuCost();
-                    proto->leftCount_ = thread_->leftCount();
-                    send(inspectorId_, "return_timer_info", proto);
-                }
-            }
             OpenThread::Sleep(10);
         }
     }
-    // 提供定时器运行信息
+    // provide timer info
     void get_timer_info(const Data& data)
     {
         auto proto = new TimerInfoMsg;
@@ -771,7 +688,6 @@ public:
         send(data.srcPid_, "return_timer_info", proto);
         sendLoop("start_timer");
     }
-    //接收Server的定时器订阅事件，定时器触发后，就把事件发送回去。
     void request_timer(const Data& data)
     {
         auto& proto = data.proto<TimerEventMsg>();
@@ -779,7 +695,7 @@ public:
         sendLoop("start_timer");
     }
 };
-//业务，向监控查询可用的定时器，然后向此定时器请求定时事件
+
 class Server:public Worker
 {
     int inspectorId_;
@@ -798,15 +714,19 @@ public:
     {
         if (inspectorId_ < 0)
         {
-            inspectorId_ = WorkerId("Inspector");
+            inspectorId_ = ThreadId("Inspector");
         }
         return inspectorId_;
     }
     virtual void onStart()
     {
+        while (inspectorId_ < 0)
+        {
+            inspectorId_ = ThreadId("Inspector");
+            OpenThread::Sleep(100);
+        }
         sendLoop("start_work");
     }
-    //向监控查询可用定时器
     void start_work(const Data& data)
     {
         while (true)
@@ -821,7 +741,6 @@ public:
             OpenThread::Sleep(1000);
         }
     }
-    //监控返回的定时器信息，然后向该定时器请求定时事件
     void query_timer_info(const Data& data)
     {
         auto& proto = data.proto<TimerInfoMsg>();
@@ -841,10 +760,8 @@ public:
             sendLoop("start_work");
         }
     }
-    //定时器触发以后，发送回来的定时事件
     void return_timer(const Data& data)
     {
-    	//测试次数到达后，停止测试，关闭全部线程
         if (collect_++ > 100)
         {
             OpenThread::StopAll();
@@ -852,11 +769,12 @@ public:
         }
         sendLoop("start_work");
     }
+    
 };
 
 int main()
 {
-	//创建一个Inspector，2个Timer和2个Server
+    OpenThread::StopAll();
     std::vector<Worker*> vectWorker =
     {
         new Inspector("Inspector"),
@@ -865,23 +783,23 @@ int main()
         new Server("server1"),
         new Server("server2")
     };
-    //启动Worker
     std::vector<std::string> vectName;
     for (size_t i = 0; i < vectWorker.size(); i++)
     {
-        vectName.push_back(vectWorker[i]->name_);
+        vectName.push_back(vectWorker[i]->name());
         vectWorker[i]->start();
     }
-    //全部启动以后，发送start消息
-    Worker::Send(vectName, "do_start", NULL);
-    //等待全部线程退出
+    // all working, send "msg_from_main" msg;
+    auto msg = new ProtoBuffer;
+    Worker::Send(vectName, "msg_from_main", msg);
+
     OpenThread::ThreadJoinAll();
-    //释放内存
     for (size_t i = 0; i < vectWorker.size(); i++)
     {
         delete vectWorker[i];
     }
     vectWorker.clear();
+    printf("Pause\n");
     return getchar();
 }
 ```

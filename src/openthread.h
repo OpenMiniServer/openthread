@@ -223,6 +223,30 @@ private:
      static inline void ThreadJoin(const std::initializer_list<std::string>& list) 
      { std::vector<std::string> v = list; return ThreadJoin(v); }
 };
+typedef const OpenThread::Msg OpenThreadMsg;
+
+class OpenThreader
+{
+public:
+    OpenThreader(const std::string& name) :name_(name) {}
+    virtual ~OpenThreader()
+    {
+        stop();
+    }
+    virtual void start();
+    virtual void stop();
+    virtual void onStart() { }
+    virtual void onMsg(OpenThreadMsg& msg) { }
+    virtual void onStop() { }
+    inline int pid() { OpenThread* p = thread_.get(); return p ? p->pid() : -1; }
+    const std::string& name() { return name_; }
+    static void Thread(OpenThreadMsg& msg);
+    static inline int ThreadId(const std::string& name) { return OpenThread::ThreadId(name); }
+    static inline const std::string& ThreadName(int pid) { return OpenThread::ThreadName(pid); }
+protected:
+    const std::string name_;
+    std::shared_ptr<OpenThread> thread_;
+};
 
 class OpenThreadPool
 {
@@ -284,9 +308,6 @@ private:
     volatile bool isClearIng_;
     pthread_mutex_t mutex_;
 };
-
-
-typedef const OpenThread::Msg OpenThreadMsg;
 
 class OpenThreadRef
 {

@@ -44,44 +44,25 @@ struct Rpc
 {
     Handle handle_;
 };
-class Worker
+class Worker:public OpenThreader
 {
 public:
     Worker(const std::string& name)
-        :name_(name)
-        ,sessionId_(0)
-    {
-        mapKeyFunc_["do_start"] = { (Handle)&Worker::do_start };
-    }
-    ~Worker()
-    {
-        stop();
-    }
-    void start()
-    {
-        auto threadRef = OpenThread::Thread(name_);
-        assert(!threadRef);
-        threadRef = OpenThread::Create(name_);
-        assert(threadRef);
-        if (threadRef)
-        {
-            thread_ = OpenThread::GetThread(threadRef);
-            assert(!thread_->isRunning());
-            thread_->setCustom(this);
-            thread_->start(Worker::Thread);
-        }
-    }
-    void do_start(const Data& data)
-    {
-        onStart();
-    }
-    virtual void onInit()
+        :OpenThreader(name)
     {
     }
-    virtual void onStart()
+    virtual ~Worker() {}
+    virtual void start()
+    {
+        mapKeyFunc_["msg_from_main"] = { (Handle)&Worker::msg_from_main };
+        OpenThreader::start();
+    }
+
+    void msg_from_main(const Data& data)
     {
     }
-    virtual void onMsg(const Data& data)
+
+    void onData(const Data& data)
     {
         printf("[%s]receive<<=[%s] key:%s\n", name_.c_str(), data.srcName_.c_str(), data.rpc_.c_str());
         auto iter = mapKeyFunc_.find(data.rpc_);
@@ -96,10 +77,15 @@ public:
         }
         printf("[%s]no implement key:%s\n", name_.c_str(), data.rpc_.c_str());
     }
+    virtual void onMsg(OpenThreadMsg& msg)
+    {
+        const Data* data = msg.data<Data>();
+        if (data) onData(*data);
+    }
     // proto will be delete
     bool send(int sid, const std::string& key, ProtoBuffer* proto)
     {
-        printf("[%s]send=>[%s] key:%s\n", name_.c_str(), WorkerName(sid).c_str(), key.c_str());
+        printf("[%s]send=>[%s] key:%s\n", name_.c_str(), ThreadName(sid).c_str(), key.c_str());
         auto data = std::shared_ptr<Data>(new Data(pid(), name_, key, proto));
         bool ret = OpenThread::Send(sid, data);
         //assert(ret);
@@ -130,46 +116,9 @@ public:
         //assert(ret);
         return ret;
     }
-    void stop()
+    virtual void stop()
     {
-        auto threadRef = OpenThread::Thread(name_);
-        if (threadRef)
-        {
-            assert(threadRef == thread_);
-            if (threadRef.isRunning())
-            {
-                threadRef.stop();
-                threadRef.waitStop();
-            }
-        }
-        else
-        {
-            thread_.reset();
-        }
-    }
-    virtual void onStop()
-    {
-    }
-    static void Thread(OpenThreadMsg& msg)
-    {
-        Worker* that = msg.custom<Worker>();
-        if (!that)
-        {
-            assert(false); return;
-        }
-        switch (msg.state_)
-        {
-        case OpenThread::RUN: 
-            break;
-        case OpenThread::START:
-            that->onInit(); return;
-        case OpenThread::STOP:
-            that->onStop(); return;
-        default:
-            assert(false); return;
-        }
-        const Data* data = msg.data<Data>();
-        if (data) that->onMsg(*data);
+        OpenThreader::stop();
     }
     static bool Send(std::vector<std::string>& vectName, const std::string& key, ProtoBuffer* proto)
     {
@@ -179,28 +128,17 @@ public:
         assert(ret);
         return ret;
     }
-
-    const std::string name_;
-    static inline int WorkerId(const std::string& name) { return OpenThread::ThreadId(name); }
-    static inline const std::string& WorkerName(int pid) { return OpenThread::ThreadName(pid); }
 protected:
     void sendLoop(const std::string& key)
     {
         auto proto = new ProtoBuffer;
         send(pid(), key, proto);
     }
-    int pid()
-    {
-        OpenThread* p = thread_.get();
-        return p ? p->pid() : -1;
-    }
     bool canLoop()
     {
         OpenThread* p = thread_.get();
         return p ? (p->isRunning() && !p->hasMsg()) : false;
     }
-    int sessionId_;
-    std::shared_ptr<OpenThread> thread_;
     std::unordered_map<std::string, Rpc> mapKeyFunc_;
 };
 
@@ -307,6 +245,21 @@ public:
     }
     virtual void onStart()
     {
+        while (inspectorId_ < 0)
+        {
+            inspectorId_ = ThreadId("Inspector");
+            if (inspectorId_ >= 0)
+            {
+                auto proto = new TimerInfoMsg;
+                proto->workerId_ = pid();
+                proto->dataTime_ = OpenThread::MilliUnixtime();
+                proto->cpuCost_ = thread_->cpuCost();
+                proto->leftCount_ = thread_->leftCount();
+                send(inspectorId_, "return_timer_info", proto);
+                break;
+            }
+            OpenThread::Sleep(100);
+        }
         sendLoop("start_timer");
     }
     void start_timer(const Data& data)
@@ -333,19 +286,6 @@ public:
                     {
                         break;
                     }
-                }
-            }
-            if (inspectorId_ < 0)
-            {
-                inspectorId_ = WorkerId("Inspector");
-                if (inspectorId_ >= 0)
-                {
-                    auto proto = new TimerInfoMsg;
-                    proto->workerId_ = pid();
-                    proto->dataTime_ = OpenThread::MilliUnixtime();
-                    proto->cpuCost_ = thread_->cpuCost();
-                    proto->leftCount_ = thread_->leftCount();
-                    send(inspectorId_, "return_timer_info", proto);
                 }
             }
             OpenThread::Sleep(10);
@@ -388,12 +328,17 @@ public:
     {
         if (inspectorId_ < 0)
         {
-            inspectorId_ = WorkerId("Inspector");
+            inspectorId_ = ThreadId("Inspector");
         }
         return inspectorId_;
     }
     virtual void onStart()
     {
+        while (inspectorId_ < 0)
+        {
+            inspectorId_ = ThreadId("Inspector");
+            OpenThread::Sleep(100);
+        }
         sendLoop("start_work");
     }
     void start_work(const Data& data)
@@ -455,11 +400,12 @@ int main()
     std::vector<std::string> vectName;
     for (size_t i = 0; i < vectWorker.size(); i++)
     {
-        vectName.push_back(vectWorker[i]->name_);
+        vectName.push_back(vectWorker[i]->name());
         vectWorker[i]->start();
     }
-    // all working, send "start" msg;
-    Worker::Send(vectName, "do_start", NULL);
+    // all working, send "msg_from_main" msg;
+    auto msg = new ProtoBuffer;
+    Worker::Send(vectName, "msg_from_main", msg);
 
     OpenThread::ThreadJoinAll();
     for (size_t i = 0; i < vectWorker.size(); i++)

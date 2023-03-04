@@ -417,13 +417,12 @@ using namespace open;
 //Assume it's a Google protobuf object
 struct ProtoBuffer
 {
-	//Virtual function in base class
     virtual ~ProtoBuffer() {}
 };
-//Intermediate data structure for communication between Worker classes
+
 class Data
 {
-    ProtoBuffer* proto_; //Data carried
+    ProtoBuffer* proto_;
 public:
     Data() :proto_(0), srcPid_(-1) {}
     Data(int pid, const std::string& name, const std::string& key, ProtoBuffer* proto)
@@ -433,9 +432,9 @@ public:
         if (proto_) delete proto_;
         proto_ = 0;
     }
-    int srcPid_; // ID of the sending worker
-    std::string rpc_; // Name of the routing function
-    std::string srcName_; // Name of the sending worker
+    int srcPid_;
+    std::string rpc_;
+    std::string srcName_;
     template <class T>
     const T& proto() const 
     {
@@ -452,54 +451,23 @@ struct Rpc
 {
     Handle handle_;
 };
-class Worker
+class Worker:public OpenThreader
 {
 public:
     Worker(const std::string& name)
-        :name_(name)
-        ,sessionId_(0)
-    {
-        mapKeyFunc_["do_start"] = { (Handle)&Worker::do_start };
-    }
-    ~Worker()
-    {
-        stop();
-    }
-    void start()
-    {
-    	// Query the thread corresponding to name, not created, so it is null
-        auto threadRef = OpenThread::Thread(name_);
-        assert(!threadRef);
-        // Create a thread named name
-        threadRef = OpenThread::Create(name_);
-        assert(threadRef);
-        if (threadRef)
-        {
-            // Get the real object of the thread for using its advanced features.
-            // Note that only advanced features can be used in this thread, otherwise it will cause data conflicts between threads
-            thread_ = OpenThread::GetThread(threadRef);
-            assert(!thread_->isRunning());
-            // Can only be specified once and can only be accessed in child thread.
-            thread_->setCustom(this);
-            // Specify the function and start the thread,
-            thread_->start(Worker::Thread);
-        }
-    }
-    // After all threads are started, the main thread sends a message to call do_start
-    void do_start(const Data& data)
-    {
-        onStart();
-    }
-    // Called when the thread starts
-    virtual void onInit()
+        :OpenThreader(name)
     {
     }
-    // Called after all threads have started,
-    virtual void onStart()
+    virtual ~Worker() {}
+    virtual void start()
+    {
+        mapKeyFunc_["msg_from_main"] = { (Handle)&Worker::msg_from_main };
+        OpenThreader::start();
+    }
+    void msg_from_main(const Data& data)
     {
     }
-    //This method is called after this child thread receives a message.
-    virtual void onMsg(const Data& data)
+    void onData(const Data& data)
     {
         printf("[%s]receive<<=[%s] key:%s\n", name_.c_str(), data.srcName_.c_str(), data.rpc_.c_str());
         auto iter = mapKeyFunc_.find(data.rpc_);
@@ -514,16 +482,21 @@ public:
         }
         printf("[%s]no implement key:%s\n", name_.c_str(), data.rpc_.c_str());
     }
-    // Send a message to the thread with ID sid. This method will call delete to release proto and can only be passed once. Managed by std::shared_ptr
+    virtual void onMsg(OpenThreadMsg& msg)
+    {
+        const Data* data = msg.data<Data>();
+        if (data) onData(*data);
+    }
+    // proto will be delete
     bool send(int sid, const std::string& key, ProtoBuffer* proto)
     {
-        printf("[%s]send=>[%s] key:%s\n", name_.c_str(), WorkerName(sid).c_str(), key.c_str());
+        printf("[%s]send=>[%s] key:%s\n", name_.c_str(), ThreadName(sid).c_str(), key.c_str());
         auto data = std::shared_ptr<Data>(new Data(pid(), name_, key, proto));
         bool ret = OpenThread::Send(sid, data);
         //assert(ret);
         return ret;
     }
-    // Send a message to the thread named name. This method will call delete to release proto and can only be passed once. Managed by std::shared_ptr
+    // proto will be delete
     bool send(const std::string& name, const std::string& key, ProtoBuffer* proto)
     {
         printf("[%s]send=>[%s] key:%s\n", name_.c_str(), name.c_str(), key.c_str());
@@ -532,7 +505,6 @@ public:
         //assert(ret);
         return ret;
     }
-    // Send a message to multiple threads with ID sid. This method will call delete to release proto and can only be passed once. Managed by std::shared_ptr
     bool send(std::vector<int>& vectSid, const std::string& key, ProtoBuffer* proto)
     {
         printf("[%s]send=>size[%d] key:%s\n", name_.c_str(), (int)vectSid.size(), key.c_str());
@@ -541,7 +513,6 @@ public:
         //assert(ret);
         return ret;
     }
-    // Send a message to multiple threads with Name. This method will call delete to release proto and can only be passed once. Managed by std::shared_ptr
     bool send(std::vector<std::string>& vectName, const std::string& key, ProtoBuffer* proto)
     {
         printf("[%s]send=>size[%d] key:%s\n", name_.c_str(), (int)vectName.size(), key.c_str());
@@ -550,89 +521,38 @@ public:
         //assert(ret);
         return ret;
     }
-    //Stop thread
-    void stop()
+    virtual void stop()
     {
-        auto threadRef = OpenThread::Thread(name_);
-        if (threadRef)
-        {
-            assert(threadRef == thread_);
-            if (threadRef.isRunning())
-            {
-                threadRef.stop();
-                threadRef.waitStop();
-            }
-        }
-        else
-        {
-            thread_.reset();
-        }
-    }
-    //Thread exit.
-    virtual void onStop()
-    {
-    }
-    //Thread Funciton
-    static void Thread(OpenThreadMsg& msg)
-    {
-        Worker* that = msg.custom<Worker>();
-        if (!that)
-        {
-            assert(false); return;
-        }
-        switch (msg.state_)
-        {
-        case OpenThread::RUN: 
-            break;
-        case OpenThread::START:
-            that->onInit(); return;
-        case OpenThread::STOP:
-            that->onStop(); return;
-        default:
-            assert(false); return;
-        }
-        const Data* data = msg.data<Data>();
-        if (data) that->onMsg(*data);
+        OpenThreader::stop();
     }
     static bool Send(std::vector<std::string>& vectName, const std::string& key, ProtoBuffer* proto)
     {
         printf("Send=>size[%d] key:%s\n", (int)vectName.size(), key.c_str());
         auto data = std::shared_ptr<Data>(new Data(-1, "Global", key, proto));
         bool ret = OpenThread::Send(vectName, data);
-        //assert(ret);
+        assert(ret);
         return ret;
     }
-
-    const std::string name_;
-    static inline int WorkerId(const std::string& name) { return OpenThread::ThreadId(name); }
-    static inline const std::string& WorkerName(int pid) { return OpenThread::ThreadName(pid); }
 protected:
     void sendLoop(const std::string& key)
     {
         auto proto = new ProtoBuffer;
         send(pid(), key, proto);
     }
-    int pid()
-    {
-        OpenThread* p = thread_.get();
-        return p ? p->pid() : -1;
-    }
     bool canLoop()
     {
         OpenThread* p = thread_.get();
         return p ? (p->isRunning() && !p->hasMsg()) : false;
     }
-    int sessionId_;
-    std::shared_ptr<OpenThread> thread_;
     std::unordered_map<std::string, Rpc> mapKeyFunc_;
 };
-// Imitate protobuff data, request timer data structure
+
 struct TimerEventMsg :public ProtoBuffer
 {
     int workerId_;
     int64_t deadline_;
 };
-// Imitate protobuff data, timer information data structure
+
 struct TimerInfoMsg :public ProtoBuffer
 {
     TimerInfoMsg() 
@@ -642,7 +562,7 @@ struct TimerInfoMsg :public ProtoBuffer
     int64_t cpuCost_;
     int64_t dataTime_;
 };
-//Monitor class, get timer information for load balancing of Timer
+
 class Inspector:public Worker
 {
     std::unordered_map<std::string, TimerInfoMsg> mapTimerInfo_;
@@ -657,7 +577,6 @@ public:
     virtual void onStart()
     {
     }
-    //Get information from the timer
     void start_inspect(const Data& data)
     {
         std::vector<int> vectPid;
@@ -670,7 +589,7 @@ public:
         auto proto = new ProtoBuffer;
         send(vectPid, "get_timer_info", proto);
     }
-	// Receive information from the timer
+
     void return_timer_info(const Data& data)
     {
         auto& proto = data.proto<TimerInfoMsg>();
@@ -684,7 +603,6 @@ public:
             vectQueryId.clear();
         }
     }
-    //Provide the most idle timer ID to the Server.
     void query_timer_info(const Data& data)
     {
         TimerInfoMsg* tmpInfo = 0;
@@ -716,11 +634,10 @@ public:
         }
     }
 };
-//Timer object class
+
 class Timer:public Worker
 {
     int inspectorId_;
-    //Timed events, from small to large, can have multiple keys. 
     std::multimap<int64_t, int> mapTimerEvent;
 public:
     Timer(const std::string& name):Worker(name) 
@@ -732,9 +649,23 @@ public:
     }
     virtual void onStart()
     {
+        while (inspectorId_ < 0)
+        {
+            inspectorId_ = ThreadId("Inspector");
+            if (inspectorId_ >= 0)
+            {
+                auto proto = new TimerInfoMsg;
+                proto->workerId_ = pid();
+                proto->dataTime_ = OpenThread::MilliUnixtime();
+                proto->cpuCost_ = thread_->cpuCost();
+                proto->leftCount_ = thread_->leftCount();
+                send(inspectorId_, "return_timer_info", proto);
+                break;
+            }
+            OpenThread::Sleep(100);
+        }
         sendLoop("start_timer");
     }
-    //Timing logic, if the timer is triggered, send a timed event 
     void start_timer(const Data& data)
     {
         int64_t curTime = 0;
@@ -748,7 +679,6 @@ public:
                     auto iter = mapTimerEvent.begin();
                     if (curTime > iter->first)
                     {
-                    	//Trigger the timer and send a timed event
                         auto proto = new TimerEventMsg;
                         proto->workerId_ = pid();
                         proto->deadline_ = curTime;
@@ -762,24 +692,10 @@ public:
                     }
                 }
             }
-            if (inspectorId_ < 0)
-            {
-            	//Register with the monitor and send your own running information
-                inspectorId_ = WorkerId("Inspector");
-                if (inspectorId_ >= 0)
-                {
-                    auto proto = new TimerInfoMsg;
-                    proto->workerId_ = pid();
-                    proto->dataTime_ = OpenThread::MilliUnixtime();
-                    proto->cpuCost_ = thread_->cpuCost();
-                    proto->leftCount_ = thread_->leftCount();
-                    send(inspectorId_, "return_timer_info", proto);
-                }
-            }
             OpenThread::Sleep(10);
         }
     }
-    // Provide timer operation information.
+    // provide timer info
     void get_timer_info(const Data& data)
     {
         auto proto = new TimerInfoMsg;
@@ -790,8 +706,6 @@ public:
         send(data.srcPid_, "return_timer_info", proto);
         sendLoop("start_timer");
     }
-    // Receive the timer subscription event from the Server. 
-    // After the timer is triggered, send the event back.
     void request_timer(const Data& data)
     {
         auto& proto = data.proto<TimerEventMsg>();
@@ -800,8 +714,6 @@ public:
     }
 };
 
-// Business service queries the monitor for available timers 
-// and then requests a timed event from this timer. 
 class Server:public Worker
 {
     int inspectorId_;
@@ -820,15 +732,19 @@ public:
     {
         if (inspectorId_ < 0)
         {
-            inspectorId_ = WorkerId("Inspector");
+            inspectorId_ = ThreadId("Inspector");
         }
         return inspectorId_;
     }
     virtual void onStart()
     {
+        while (inspectorId_ < 0)
+        {
+            inspectorId_ = ThreadId("Inspector");
+            OpenThread::Sleep(100);
+        }
         sendLoop("start_work");
     }
-    // Query the monitor for available timers.
     void start_work(const Data& data)
     {
         while (true)
@@ -843,7 +759,6 @@ public:
             OpenThread::Sleep(1000);
         }
     }
-    // The timer information returned by the monitor is then used to request a timed event from that timer. 
     void query_timer_info(const Data& data)
     {
         auto& proto = data.proto<TimerInfoMsg>();
@@ -863,10 +778,8 @@ public:
             sendLoop("start_work");
         }
     }
-    // After the timer is triggered, the timed event is sent back. 
     void return_timer(const Data& data)
     {
-    	// After the test times are reached, stop testing and close all threads.
         if (collect_++ > 100)
         {
             OpenThread::StopAll();
@@ -878,7 +791,7 @@ public:
 
 int main()
 {
-	// Create an Inspector, 2 Timers and 2 Servers
+    OpenThread::StopAll();
     std::vector<Worker*> vectWorker =
     {
         new Inspector("Inspector"),
@@ -887,23 +800,23 @@ int main()
         new Server("server1"),
         new Server("server2")
     };
-    // Start Workers
     std::vector<std::string> vectName;
     for (size_t i = 0; i < vectWorker.size(); i++)
     {
-        vectName.push_back(vectWorker[i]->name_);
+        vectName.push_back(vectWorker[i]->name());
         vectWorker[i]->start();
     }
-    // After all have started, send start message.
-    Worker::Send(vectName, "do_start", NULL);
-    // Wait for all threads to exit.
+    // all working, send "msg_from_main" msg;
+    auto msg = new ProtoBuffer;
+    Worker::Send(vectName, "msg_from_main", msg);
+
     OpenThread::ThreadJoinAll();
-    // Release memory
     for (size_t i = 0; i < vectWorker.size(); i++)
     {
         delete vectWorker[i];
     }
     vectWorker.clear();
+    printf("Pause\n");
     return getchar();
 }
 ```

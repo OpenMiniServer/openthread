@@ -532,6 +532,56 @@ void OpenThread::ThreadJoinAll()
     DefaultPool_.threadJoinAll();
 }
 
+//OpenThreader
+void OpenThreader::start()
+{
+    auto threadRef = OpenThread::Thread(name_);
+    assert(!threadRef);
+    threadRef = OpenThread::Create(name_);
+    assert(threadRef);
+    if (threadRef)
+    {
+        thread_ = OpenThread::GetThread(threadRef);
+        assert(!thread_->isRunning());
+        thread_->setCustom(this);
+        thread_->start(OpenThreader::Thread);
+    }
+}
+void OpenThreader::stop()
+{
+    auto threadRef = OpenThread::Thread(name_);
+    if (threadRef)
+    {
+        assert(threadRef == thread_);
+        if (threadRef.isRunning())
+        {
+            threadRef.stop();
+            threadRef.waitStop();
+        }
+    }
+    else
+        thread_.reset();
+}
+
+void OpenThreader::Thread(OpenThreadMsg& msg)
+{
+    OpenThreader* that = msg.custom<OpenThreader>();
+    if (!that)
+    {
+        assert(false); return;
+    }
+    switch (msg.state_)
+    {
+    case OpenThread::RUN:
+        that->onMsg(msg); return;
+    case OpenThread::START:
+        that->onStart(); return;
+    case OpenThread::STOP:
+        that->onStop(); return;
+    default:
+        assert(false); return;
+    }
+}
 
 // SafeMap
 OpenThreadPool::SafeMap::SafeMap()
