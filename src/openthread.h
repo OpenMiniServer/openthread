@@ -228,22 +228,20 @@ typedef const OpenThread::Msg OpenThreadMsg;
 class OpenThreader
 {
 public:
-    OpenThreader(const std::string& name) :name_(name) {}
-    virtual ~OpenThreader()
-    {
-        stop();
-    }
+    OpenThreader(const std::string& name) :name_(name), pid_(-1) {}
+    virtual ~OpenThreader(){ stop(); }
     virtual void start();
     virtual void stop();
     virtual void onStart() { }
     virtual void onMsg(OpenThreadMsg& msg) { }
     virtual void onStop() { }
-    inline int pid() { OpenThread* p = thread_.get(); return p ? p->pid() : -1; }
+    const inline int pid() { return pid_; }
     const std::string& name() { return name_; }
     static void Thread(OpenThreadMsg& msg);
     static inline int ThreadId(const std::string& name) { return OpenThread::ThreadId(name); }
     static inline const std::string& ThreadName(int pid) { return OpenThread::ThreadName(pid); }
 protected:
+    int pid_;
     const std::string name_;
     std::shared_ptr<OpenThread> thread_;
 };
@@ -307,6 +305,7 @@ private:
     volatile bool isInit_;
     volatile bool isClearIng_;
     pthread_mutex_t mutex_;
+    pthread_mutex_t mutex_close_;
 };
 
 class OpenThreadRef

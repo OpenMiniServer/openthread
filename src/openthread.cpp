@@ -539,9 +539,11 @@ void OpenThreader::start()
     assert(!threadRef);
     threadRef = OpenThread::Create(name_);
     assert(threadRef);
+    pid_ = -1;
     if (threadRef)
     {
         thread_ = OpenThread::GetThread(threadRef);
+        pid_ = thread_->pid();
         assert(!thread_->isRunning());
         thread_->setCustom(this);
         thread_->start(OpenThreader::Thread);
@@ -726,11 +728,13 @@ OpenThreadPool::OpenThreadPool()
     isClearIng_(false)
 {
     pthread_mutex_init(&mutex_, NULL);
+    pthread_mutex_init(&mutex_close_, NULL);
 }
 
 OpenThreadPool::~OpenThreadPool()
 {
     pthread_mutex_destroy(&mutex_);
+    pthread_mutex_destroy(&mutex_close_);
 }
 
 void OpenThreadPool::lock()
@@ -833,12 +837,16 @@ bool OpenThreadPool::checkInit()
 
 void OpenThreadPool::stopAll()
 {
-    lock();
+    if (isClearIng_)
+    {
+        return;
+    }
+    pthread_mutex_lock(&mutex_close_);
     isClearIng_ = true;
     if (!isInit_)
     {
         isClearIng_ = false;
-        unlock();
+        pthread_mutex_unlock(&mutex_close_);
         return;
     }
     std::shared_ptr<OpenThread> sptr;
@@ -849,28 +857,23 @@ void OpenThreadPool::stopAll()
         if (!sptr) continue;
         if (sptr->isRunning())
         {
-            unlock();
             sptr->stop();
             int count = 1;
             while (sptr->isRunning())
             {
-                OpenThread::Sleep(count);
-                count += 2;
-                if (count > 4)
+                OpenThread::Sleep(200);
+                ++count;
+                if (count == 5 || count == 10)
                 {
-                    if (sptr->isCurrent())
-                    {
-                        break;
-                    }
+                    if (sptr->isCurrent()) break;
                     sptr->stop();
                 }
             }
-            lock();
         }
     }
     safeMap_.clear();
     isClearIng_ = false;
-    unlock();
+    pthread_mutex_unlock(&mutex_close_);
 }
 
 std::shared_ptr<OpenThread> OpenThreadPool::create(const std::string& name)
