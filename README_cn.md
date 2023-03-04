@@ -20,7 +20,7 @@ cd build
 #如果是win32，在该目录出现openthread.sln，点击它就可以启动vs写代码调试
 cmake ..
 make
-./test
+./helloworld
 ```
 
 ## 技术特点

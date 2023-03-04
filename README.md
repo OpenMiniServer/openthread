@@ -25,7 +25,7 @@ cd build
 # If it is win32, openthread.sln will appear in this directory. Click it to start VS for coding and debugging.
 cmake ..
 make
-./test
+./helloworld
 ```
 
 ## Technical Features
