@@ -6,7 +6,8 @@ Using elegant methods to create threads, manage threads and communicate between 
 
 OpenThread has no dependencies and is designed for all platforms with only two source files, making it easy for beginners to play with C++ multi-threading development. 
 
-OpenLinyou series project: https://github.com/openlinyou
+**The OpenLinyou project designs a cross-platform server framework. Write code in VS or XCode and run it on Linux without any changes, even on Android and iOS.**
+OpenLinyou：https://github.com/openlinyou
 
 ## Cross-platform support 
 Designed for cross-platforms such as Windows and Linux.
@@ -27,6 +28,10 @@ cmake ..
 make
 ./helloworld
 ```
+
+## All source files
++ src/openthread.h
++ src/openthread.cpp
 
 ## Technical Features
 The technical features of OpenThread: 

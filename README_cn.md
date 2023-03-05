@@ -1,11 +1,15 @@
 # OpenThread
 OpenThread是最舒心的跨平台多线程并发库。
+
 使用优雅的方式，创建线程、管理线程和线程间通信，从而实现多核并发。
+
 OpenThread无任何依赖，全平台设计，只有两个源文件，让小白都可以轻松玩转C++多线程开发。
-OpenLinyou系列项目：https://github.com/openlinyou
+
+**OpenLinyou项目设计跨平台服务器框架，在VS或者XCode上写代码，无需任何改动就可以编译运行在Linux上，甚至是安卓和iOS.**
+OpenLinyou：https://github.com/openlinyou
 
 ## 跨平台支持
-Windows、linux等跨平台设计
+Windows、linux、Mac、iOS、Android等跨平台设计
 
 ## 编译和执行
 请安装cmake工具，用cmake构建工程，可以在vs或者xcode上编译运行。
@@ -17,18 +21,22 @@ cd ./openthread
 #创建build工程目录
 mkdir build
 cd build
-#如果是win32，在该目录出现openthread.sln，点击它就可以启动vs写代码调试
 cmake ..
+#如果是win32，在该目录出现openthread.sln，点击它就可以启动vs写代码调试
 make
 ./helloworld
 ```
 
+## 全部源文件
++ src/openthread.h
++ src/openthread.cpp
+
 ## 技术特点
 OpenThread的技术特点：
-跨平台设计，提供Linux统一的pthread接口。
-线程池管理采用智能指针和无锁map，实现高效访问线程对象。
-每个线程自带消息队列，消息放入队列原子锁，而读取消息队列，无锁操作。保证线程交换信息高效。
-线程交互数据，采用智能指针管理，实现内存自动化管理，无需担忧内存泄漏。
+1. 跨平台设计，提供Linux统一的pthread接口，支持安卓和iOS。
+2. 线程池管理采用智能指针和无锁map，实现高效访问线程对象。
+3. 每个线程自带消息队列，消息放入队列原子锁，而读取消息队列，无锁操作。保证线程交换信息高效。
+4. 线程交互数据，采用智能指针管理，实现内存自动化管理，无需担忧内存泄漏。
 
 
 ## 1.创建线程HelloWorld
