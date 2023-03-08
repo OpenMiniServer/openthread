@@ -14,6 +14,7 @@ Windows、linux、Mac、iOS、Android等跨平台设计
 ## 编译和执行
 请安装cmake工具，用cmake构建工程，可以在vs或者xcode上编译运行。
 源代码：https://github.com/openlinyou/openthread
+https://gitee.com/linyouhappy/openthread
 ```
 #克隆项目
 git clone https://github.com/openlinyou/openthread
