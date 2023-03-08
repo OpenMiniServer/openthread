@@ -7,6 +7,7 @@ OpenThread无任何依赖，全平台设计，只有两个源文件，让小白�
 
 **OpenLinyou项目设计跨平台服务器框架，在VS或者XCode上写代码，无需任何改动就可以编译运行在Linux上，甚至是安卓和iOS.**
 OpenLinyou：https://github.com/openlinyou
+https://gitee.com/linyouhappy
 
 ## 跨平台支持
 Windows、linux、Mac、iOS、Android等跨平台设计
@@ -102,17 +103,19 @@ struct Test1Data
     }
 };
 
-// Test1
+// 子线程调用
 void Test1Thread(OpenThreadMsg& msg)
 {
+    //线程启动的消息
     if (msg.state_ == OpenThread::START)
     {
         printf("Test1Thread[%s] START\n", msg.name().c_str());
         OpenThread::Sleep(1000);
     }
+    //线程接收到的消息
     else if (msg.state_ == OpenThread::RUN)
     {
-        // recevie msg
+        // //接收主线程的OpenSyncReturn对象，对其唤醒并发消息。
         OpenSyncReturn<TestData, Test1Data>* data = msg.edit<OpenSyncReturn<TestData, Test1Data>>();
         if (data)
         {
@@ -125,11 +128,12 @@ void Test1Thread(OpenThreadMsg& msg)
             sptr->data_.assign("Of Course,I Still Love You!");
             data->wakeup(sptr);
 
-            //wait receive
+            //等待主线程唤醒
             sptr->openSync_.await();
         }
         OpenThread::Sleep(1000);
     }
+    //线程退出前的消息
     else if (msg.state_ == OpenThread::STOP)
     {
         printf("Test1Thread[%s] STOP\n", msg.name().c_str());
@@ -139,11 +143,11 @@ void Test1Thread(OpenThreadMsg& msg)
 
 int main()
 {
-    // create and start thread
+    // 指定线程名，并创建。未填函数，线程未启动状态，需要执行start启动
     auto threadRef = OpenThread::Create("Test1Thread");
     threadRef.start(Test1Thread);
 
-    // send msg to thread
+    // 给子线程发送消息
     auto msg = std::shared_ptr<OpenSyncReturn<TestData, Test1Data>>(new OpenSyncReturn<TestData, Test1Data>);
     {
         auto data = std::shared_ptr<TestData>(new TestData);
@@ -151,19 +155,20 @@ int main()
         msg->put(data);
     }
     threadRef.send(msg);
+    //阻塞主线程，等待子线程唤醒
     auto ret = msg->awaitReturn();
     if (ret)
     {
         assert(ret->data_ == "Of Course,I Still Love You!");
         printf("Test1====>>:%s\n", ret->data_.c_str());
 
-        //wake up wait.
+        //唤醒子线程的阻塞
         ret->openSync_.wakeup();
     }
-    // stop thread
+    // 向子线程发送关闭消息
     threadRef.stop();
 
-    // wait stop
+    // 等待全部线程退出
     OpenThread::ThreadJoin(threadRef);
     printf("Pause\n");
     return getchar();
