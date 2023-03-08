@@ -16,6 +16,7 @@
 #include <vector>
 #include <queue>
 #include <atomic>
+#include <assert.h>
 
 #if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
 #ifdef __cplusplus
@@ -426,7 +427,7 @@ class OpenSyncReturn
             pthread_mutex_init(&mutex_, NULL);
             pthread_cond_init(&cond_, NULL);
         }
-        OpenSyncRef(const OpenSyncRef&)
+        OpenSyncRef(const OpenSyncRef& that)
         {
             assert(false);
             isSleep_ = that.isSleep_;
