@@ -842,6 +842,7 @@ int main()
 #include "openthread.h"
 using namespace open;
 
+//业务数据结构
 struct Product
 {
     int id_;
@@ -850,6 +851,7 @@ struct Product
 };
 class Worker : public OpenThreader
 {   
+    //task
     template <class T>
     struct Task
     {
@@ -857,7 +859,7 @@ class Worker : public OpenThreader
         OpenSync openSync_;
         Task() :data_(0) {}
     };
-    //Factory
+    //Worker工程线程，提供4个worker线程。
     class Factory
     {
         const std::vector<Worker*> vectWorker_;
@@ -888,6 +890,7 @@ class Worker : public OpenThreader
         for (size_t i = 0; i < vectTask_.size(); ++i)
             vectTask_[i].openSync_.wakeup();
     }
+    //接收到任务
     virtual void onMsg(OpenThreadMsg& msg)
     {
         Task<Product>* task = msg.edit<Task<Product>>();
@@ -895,10 +898,14 @@ class Worker : public OpenThreader
         {
             vectTask_.push_back(*task);
         }
+
+        //模拟处理task业务逻辑
         if (rand() % 2 == 0)
         {
             OpenThread::Sleep(1000);
         }
+
+        //完成task任务后，就唤醒OpenSync，通知task完成
         for (size_t i = 0; i < vectTask_.size(); ++i)
         {
             auto& task = vectTask_[i];
@@ -914,20 +921,25 @@ class Worker : public OpenThreader
     int uid_;
     std::vector<Task<Product>> vectTask_;
 public:
+    //统一对外访问服务接口，
     static bool MakeProduct(std::shared_ptr<Product>& product)
     {
+        //随机选择一个worker提供服务
         auto worker = Instance_.getWorker();
         if (!worker)  return false;
+        //给worker创建任务，然后发给worker线程
         auto proto = std::shared_ptr<Task<Product>>(new Task<Product>);
         proto->data_ = product;
         bool ret = OpenThread::Send(worker->pid(), proto);
         assert(ret);
+        //阻塞，等待worker线程完成task，唤醒。
         proto->openSync_.await();
         return ret;
     }
 };
 Worker::Factory Worker::Instance_;
 
+ //子线程调用
 void TestThread(OpenThreadMsg& msg)
 {
     if (msg.state_ == OpenThread::START)
@@ -943,11 +955,13 @@ void TestThread(OpenThreadMsg& msg)
 }
 int main()
 {
+    //创建4个子线程
     OpenThread::Create("TestThread1", TestThread);
     OpenThread::Create("TestThread2", TestThread);
     OpenThread::Create("TestThread3", TestThread);
     OpenThread::Create("TestThread4", TestThread);
-    // wait stop
+
+    // 等全部子线程退出
     OpenThread::ThreadJoinAll();
     printf("Pause\n");
     return getchar();
