@@ -298,6 +298,14 @@ bool OpenThread::isCurrent()
     return pthread_equal(pthread_self(), threadId_);
 }
 
+void OpenThread::waitIdle()
+{
+    if (pthread_equal(pthread_self(), threadId_))
+        return;
+    
+    while (state_ == RUN && !isIdle_) Sleep(1);
+}
+
 void OpenThread::Run(void* arg)
 {
     assert(arg);
@@ -873,15 +881,16 @@ void OpenThreadPool::stopAll()
         if (!sptr) continue;
         if (sptr->isRunning())
         {
+            //sptr->waitIdle();
             sptr->stop();
             int count = 1;
             while (sptr->isRunning())
             {
-                OpenThread::Sleep(200);
+                if (sptr->isCurrent()) break;
+                OpenThread::Sleep(100);
                 ++count;
                 if (count == 5 || count == 10)
                 {
-                    if (sptr->isCurrent()) break;
                     sptr->stop();
                 }
             }
@@ -1317,17 +1326,18 @@ bool OpenSync::OpenSyncRef::wakeup()
     return false;
 }
 
-bool OpenSync::OpenSyncRef::wakeup(const std::shared_ptr<void>& data)
-{
-    if (isSleep_)
-    {
-        isSleep_ = 0;
-        destData_ = data;
-        pthread_cond_signal(&cond_);
-        return true;
-    }
-    return false;
-}
+//bool OpenSync::OpenSyncRef::wakeup(const std::shared_ptr<void>& data)
+//{
+//    if (isSleep_)
+//    {
+//        isSleep_ = 0;
+//        destData_ = data;
+//        pthread_cond_signal(&cond_);
+//        return true;
+//    }
+//    return false;
+//}
+
 
 
 void OpenThread::Sleep(int64_t milliSecond)
@@ -1414,7 +1424,7 @@ int pthread_mutex_destroy(pthread_mutex_t* _mutex)
 typedef unsigned(__stdcall* routinefunc)(void*);
 int pthread_create(pthread_t* thread, const pthread_attr_t* attr, void* (*start_routine1) (void*), void* arg)
 {
-    int _intThreadId;
+    int _intThreadId = 0;
     routinefunc start_routine = (routinefunc)start_routine1;
     (*thread).thread_handle = (HANDLE)_beginthreadex(NULL, 0, start_routine, arg, 0, (unsigned int*)&_intThreadId);
     (*thread).thread_id = _intThreadId;
@@ -1428,7 +1438,7 @@ int pthread_equal(pthread_t t1, pthread_t t2)
 
 pthread_t pthread_self() 
 {
-    pthread_t thread_self;
+    pthread_t thread_self = {0};
     thread_self.thread_id     = GetCurrentThreadId();
     thread_self.thread_handle = GetCurrentThread();
     return thread_self;

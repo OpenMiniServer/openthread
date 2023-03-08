@@ -80,10 +80,14 @@ public:
         OpenThread* thread_;
         std::shared_ptr<void> data_;
         Msg():thread_(0), data_(0), state_(START) {};
+        Msg(const Msg&) :thread_(0), data_(0), state_(START){}
+        void operator=(const Msg&) {}
     public:
         State state_;
         template <class T>
         inline const T* data() const { return dynamic_cast<const T*>((const T*)data_.get()); }
+        template <class T>
+        inline T* edit() const { return dynamic_cast<T*>((T*)data_.get()); }
         OpenThread& thread() const;
         const int pid() const;
         const std::string& name() const;
@@ -98,6 +102,7 @@ public:
     bool stop();
     bool send(const std::shared_ptr<void>& data);
     bool isCurrent();
+    void waitIdle();
 
 	inline bool isIdle() { return isIdle_; }
 	inline bool isRunning() { return state_ == RUN; }
@@ -175,6 +180,7 @@ private:
         unsigned int id_;
         Msg msg_;
         Node* next_;
+        Node():id_(0), next_(0){}
     };
     class SpinLock
     {
@@ -318,6 +324,7 @@ public:
     void operator=(const OpenThreadRef& that) { thread_ = that.thread_; }
     bool operator==(const OpenThreadRef& that) { return thread_ == that.thread_; }
     bool operator==(const std::shared_ptr<OpenThread>& that) { return thread_ == that; }
+    inline void waitIdle() { if (thread_) thread_->waitIdle(); }
     bool start(void (*cb)(OpenThreadMsg&));
     bool stop();
     bool send(const std::shared_ptr<void>& data);
@@ -339,45 +346,26 @@ class OpenSync
         volatile bool isSleep_;
         pthread_cond_t cond_;
         pthread_mutex_t mutex_;
-        std::shared_ptr<void> srcData_;
-        std::shared_ptr<void> destData_;
         OpenSyncRef();
         OpenSyncRef(const OpenSyncRef&);
         void operator=(const OpenSyncRef&) {}
     public:
         ~OpenSyncRef();
-        // sleep current Thread
         bool await();
-        template <class T>
-        inline const T* awaitReturn()
-        {
-            if (!await())
-                return NULL;
-            return dynamic_cast<const T*>((const T*)destData_.get());
-        }
-        template <class T>
-        inline const T* get() { return dynamic_cast<const T*>((const T*)srcData_.get()); }
-        // wakeup sleep Thread
         bool wakeup();
-        bool wakeup(const std::shared_ptr<void>& data);
         friend class OpenSync;
     };
     std::shared_ptr<OpenSyncRef> sync_;
 public:
-    OpenSync() { sync_ = std::shared_ptr<OpenSyncRef>(new OpenSyncRef);}
+    OpenSync() { sync_ = std::shared_ptr<OpenSyncRef>(new OpenSyncRef); }
     OpenSync(const OpenSync& that) { sync_ = that.sync_; }
     void operator=(const OpenSync& that) { sync_ = that.sync_; }
-    void operator=(const std::shared_ptr<void>& data) { if (sync_) sync_->srcData_ = data; }
-    void put(const std::shared_ptr<void>& data) { if (sync_) sync_->srcData_ = data; }
-    template <class T>
-    inline const T* get() { if (sync_) return sync_->get<T>(); return 0; }
+
     inline void await() { if (sync_) sync_->await(); }
-    template <class T>
-    inline const T* awaitReturn() { if (sync_) return sync_->awaitReturn<T>(); return 0; }
     inline bool wakeup() { if (sync_) return sync_->wakeup(); return false; }
-    inline bool wakeup(const std::shared_ptr<void>& data) { if (sync_) return sync_->wakeup(data); return false; }
     operator bool() const { return !!sync_; }
 };
+
 
 };
 
@@ -421,5 +409,94 @@ int pthread_cond_wait(pthread_cond_t* cv, pthread_mutex_t* external_mutex);
 #endif
 
 #endif
+
+template <class SRC, class DST = void>
+class OpenSyncReturn
+{
+    class OpenSyncRef
+    {
+        volatile bool isSleep_;
+        pthread_cond_t cond_;
+        pthread_mutex_t mutex_;
+        std::shared_ptr<SRC> srcData_;
+        std::shared_ptr<DST> destData_;
+        OpenSyncRef()
+        {
+            isSleep_ = false;
+            pthread_mutex_init(&mutex_, NULL);
+            pthread_cond_init(&cond_, NULL);
+        }
+        OpenSyncRef(const OpenSyncRef&)
+        {
+            assert(false);
+            isSleep_ = that.isSleep_;
+            pthread_mutex_init(&mutex_, NULL);
+            pthread_cond_init(&cond_, NULL);
+        }
+        void operator=(const OpenSyncRef&) {}
+    public:
+        ~OpenSyncRef()
+        {
+            pthread_mutex_destroy(&mutex_);
+            pthread_cond_destroy(&cond_);
+        }
+        bool await()
+        {
+            if (!isSleep_)
+            {
+                isSleep_ = true;
+                pthread_mutex_lock(&mutex_);
+                pthread_cond_wait(&cond_, &mutex_);
+                pthread_mutex_unlock(&mutex_);
+                return true;
+            }
+            return false;
+        }
+        inline const std::shared_ptr<DST>& awaitReturn()
+        {
+            await();
+            return destData_;
+        }
+        bool wakeup()
+        {
+            if (isSleep_)
+            {
+                isSleep_ = 0;
+                pthread_cond_signal(&cond_);
+                return true;
+            }
+            return false;
+        }
+        bool wakeup(const std::shared_ptr<DST>& data)
+        {
+            if (isSleep_)
+            {
+                isSleep_ = 0;
+                destData_ = data;
+                pthread_cond_signal(&cond_);
+                return true;
+            }
+            return false;
+        }
+        friend class OpenSyncReturn;
+    };
+    std::shared_ptr<OpenSyncRef> sync_;
+public:
+    OpenSyncReturn() { sync_ = std::shared_ptr<OpenSyncRef>(new OpenSyncRef); }
+    OpenSyncReturn(const OpenSyncReturn& that) { sync_ = that.sync_; }
+    void operator=(const OpenSyncReturn& that) { sync_ = that.sync_; }
+
+    void operator=(const std::shared_ptr<SRC>& data) { if (sync_) sync_->srcData_ = data; }
+    void put(const std::shared_ptr<SRC>& data) { if (sync_) sync_->srcData_ = data; }
+    inline const std::shared_ptr<SRC> get() const { if (sync_) return sync_->srcData_; return std::shared_ptr<SRC>(); }
+
+    inline void await() { if (sync_) sync_->await(); }
+    inline const std::shared_ptr<DST> awaitReturn() { if (sync_) return sync_->awaitReturn(); return std::shared_ptr<DST>(); }
+
+    inline bool wakeup() { if (sync_) return sync_->wakeup(); return false; }
+    inline bool wakeup(const std::shared_ptr<DST>& data) { if (sync_) return sync_->wakeup(data); return false; }
+
+    operator bool() const { return !!sync_; }
+};
 
 #endif /* HEADER_OPEN_THREAD_H */

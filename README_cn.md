@@ -1,5 +1,5 @@
 # OpenThread
-OpenThread是最舒心的跨平台多线程并发库。
+OpenThread是最舒心的跨平台多线程并发库，多线程三大设计模式: Await模式, Factory模式和Actor模式。
 
 使用优雅的方式，创建线程、管理线程和线程间通信，从而实现多核并发。
 
@@ -37,7 +37,12 @@ OpenThread的技术特点：
 2. 线程池管理采用智能指针和无锁map，实现高效访问线程对象。
 3. 每个线程自带消息队列，消息放入队列原子锁，而读取消息队列，无锁操作。保证线程交换信息高效。
 4. 线程交互数据，采用智能指针管理，实现内存自动化管理，无需担忧内存泄漏。
+5. 多线程三大设计模式: Await模式, Worker模式和Actor模式。
 
+## 多线程开发三大设计模式
+1. Await模式。两条线程，一条线程向另一条线程请求，同时阻塞等待；另一条线程接收到请求，返回数据唤醒第一条线程；第一条线程唤醒，拿到数据继续执行。
+2. Worker模式。适合客户端，创建一定量的worker线程，组成factory，向外提供唯一接口服务。
+3. Actor模式。适合服务端，一条线程一条Actor，不同的Actor负责不同的功能。
 
 ## 1.创建线程HelloWorld
 ```C++
@@ -69,9 +74,10 @@ int main()
 }
 ```
 
-## 2.阻塞等待子线程返回数据，Await操作
-在当前线程创建OpenSync对象，把OpenSync对象像消息一样发给子线程并阻塞等待，子线程接到该消息后，再发消息唤醒阻塞。
-使用OpenSync对象阻塞当前线程，子线程通过OpenSync返回数据。
+## 2.Await模式
+在主线程创建OpenSyncReturn对象，把它发给子线程，并阻塞等待子线程返回。
+子线程接到该消息后，再发消息唤醒，再发OpenSync对象给主线程，等待主线程响应。
+主线程线程被唤醒后，收到子线程消息携带的OpenSync对象，唤醒子线程。
 ```C++
 #include <assert.h>
 #include <iostream>
@@ -81,9 +87,14 @@ int main()
 using namespace open;
 
 // Test1
+struct TestData
+{
+    std::string data_;
+};
 struct Test1Data
 {
     std::string data_;
+    OpenSync openSync_;
     ~Test1Data()
     {
         printf("Test1:~Test1Data\n");
@@ -93,31 +104,31 @@ struct Test1Data
 // Test1
 void Test1Thread(OpenThreadMsg& msg)
 {
-    //线程启动的消息
     if (msg.state_ == OpenThread::START)
     {
         printf("Test1Thread[%s] START\n", msg.name().c_str());
         OpenThread::Sleep(1000);
     }
-    //线程接收到的消息
     else if (msg.state_ == OpenThread::RUN)
     {
-        //接收到OpenSync对象，对其唤醒并发消息。
-        OpenSync* data = (OpenSync*)msg.data<OpenSync>();
+        // recevie msg
+        OpenSyncReturn<TestData, Test1Data>* data = msg.edit<OpenSyncReturn<TestData, Test1Data>>();
         if (data)
         {
-            const std::string* str = data->get<std::string>();
+            std::shared_ptr<TestData> str = data->get();
             if (str)
             {
-                assert(*str == "Waiting for you!");
+                assert(str->data_ == "Waiting for you!");
             }
             auto sptr = std::shared_ptr<Test1Data>(new Test1Data);
             sptr->data_.assign("Of Course,I Still Love You!");
             data->wakeup(sptr);
+
+            //wait receive
+            sptr->openSync_.await();
         }
         OpenThread::Sleep(1000);
     }
-    //线程退出前的消息
     else if (msg.state_ == OpenThread::STOP)
     {
         printf("Test1Thread[%s] STOP\n", msg.name().c_str());
@@ -127,29 +138,31 @@ void Test1Thread(OpenThreadMsg& msg)
 
 int main()
 {
-    // 指定线程名，并创建。未填函数，线程未启动状态，需要执行start启动
+    // create and start thread
     auto threadRef = OpenThread::Create("Test1Thread");
-    //启动线程，并指定线程的执行函数
     threadRef.start(Test1Thread);
 
-    // 创建OpenSync指针对象，C++11不支持std::make_shared，故设计MakeShared
-    auto msg = std::shared_ptr<OpenSync>(new OpenSync);
-    auto data = std::shared_ptr<std::string>(new std::string);
-    data->assign("Waiting for you!");
-    msg->put(data);
-    //向子线程发消息
+    // send msg to thread
+    auto msg = std::shared_ptr<OpenSyncReturn<TestData, Test1Data>>(new OpenSyncReturn<TestData, Test1Data>);
+    {
+        auto data = std::shared_ptr<TestData>(new TestData);
+        data->data_ = "Waiting for you!";
+        msg->put(data);
+    }
     threadRef.send(msg);
-    //阻塞，等待被唤醒
-    const Test1Data* ret = msg->awaitReturn<Test1Data>();
+    auto ret = msg->awaitReturn();
     if (ret)
     {
         assert(ret->data_ == "Of Course,I Still Love You!");
         printf("Test1====>>:%s\n", ret->data_.c_str());
+
+        //wake up wait.
+        ret->openSync_.wakeup();
     }
-    //停止子线程
+    // stop thread
     threadRef.stop();
 
-    //join等待子线程退出
+    // wait stop
     OpenThread::ThreadJoin(threadRef);
     printf("Pause\n");
     return getchar();
@@ -387,7 +400,8 @@ int main()
 }
 ```
 
-## 5.设计一个多线程并发框架
+## 5.Actor设计模式
+Actor模式。适合服务端，一条线程一条Actor，不同的Actor负责不同的功能。
 用Worker类封装使用OpenThread，一条线程一个Worker业务。Inspector(监控)、Timer(定时器)和Server(服务器)继承Worker。
 Inspector负责监控多个Timer运行信息，做负载均衡。
 Timer提供定时器服务，启动时，向Inspector注册，并提供运行信息。
@@ -807,6 +821,128 @@ int main()
         delete vectWorker[i];
     }
     vectWorker.clear();
+    printf("Pause\n");
+    return getchar();
+}
+```
+
+## 6.Worker设计模式
+适合客户端，创建一定量的worker线程，组成factory，向外提供唯一接口服务。
+```C++
+#include <assert.h>
+#include <iostream>
+#include <stdio.h>
+#include <vector>
+#include "openthread.h"
+using namespace open;
+
+struct Product
+{
+    int id_;
+    std::string goods_;
+    Product() :id_(0) {}
+};
+class Worker : public OpenThreader
+{   
+    template <class T>
+    struct Task
+    {
+        std::shared_ptr<T> data_;
+        OpenSync openSync_;
+        Task() :data_(0) {}
+    };
+    //Factory
+    class Factory
+    {
+        const std::vector<Worker*> vectWorker_;
+    public:
+        Factory()
+        :vectWorker_({
+            new Worker("Producer1"),
+            new Worker("Producer2"),
+            new Worker("Producer3"),
+            new Worker("Producer4"),
+            }) {}
+        Worker* getWorker()
+        {
+            if (vectWorker_.empty()) return 0;
+            return vectWorker_[std::rand() % vectWorker_.size()];
+        }
+    };
+    static Factory Instance_;
+    // Worker
+    Worker(const std::string& name)
+        :OpenThreader(name)
+    {
+        uid_ = 1;
+        start();
+    }
+    ~Worker()
+    {
+        for (size_t i = 0; i < vectTask_.size(); ++i)
+            vectTask_[i].openSync_.wakeup();
+    }
+    virtual void onMsg(OpenThreadMsg& msg)
+    {
+        Task<Product>* task = msg.edit<Task<Product>>();
+        if (task)
+        {
+            vectTask_.push_back(*task);
+        }
+        if (rand() % 2 == 0)
+        {
+            OpenThread::Sleep(1000);
+        }
+        for (size_t i = 0; i < vectTask_.size(); ++i)
+        {
+            auto& task = vectTask_[i];
+            if (task.data_)
+            {
+                task.data_->id_ = pid_ + 100 * uid_++;
+                task.data_->goods_ = name_ + " Dog coin" + std::to_string(task.data_->id_);
+            }
+            task.openSync_.wakeup();
+        }
+        vectTask_.clear();
+    }
+    int uid_;
+    std::vector<Task<Product>> vectTask_;
+public:
+    static bool MakeProduct(std::shared_ptr<Product>& product)
+    {
+        auto worker = Instance_.getWorker();
+        if (!worker)  return false;
+        auto proto = std::shared_ptr<Task<Product>>(new Task<Product>);
+        proto->data_ = product;
+        bool ret = OpenThread::Send(worker->pid(), proto);
+        assert(ret);
+        proto->openSync_.await();
+        return ret;
+    }
+};
+Worker::Factory Worker::Instance_;
+
+void TestThread(OpenThreadMsg& msg)
+{
+    if (msg.state_ == OpenThread::START)
+    {
+        for (size_t i = 0; i < 100; i++)
+        {
+            auto product = std::shared_ptr<Product>(new Product());
+            Worker::MakeProduct(product);
+            printf("[%s] Recevie Product:%s\n", msg.name().c_str(), product->goods_.c_str());
+        }
+        msg.thread().stop();
+    }
+}
+int main()
+{
+    OpenThread::Create("TestThread1", TestThread);
+    OpenThread::Create("TestThread2", TestThread);
+    OpenThread::Create("TestThread3", TestThread);
+    OpenThread::Create("TestThread4", TestThread);
+    // wait stop
+    OpenThread::ThreadJoinAll();
     printf("Pause\n");
     return getchar();
 }

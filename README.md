@@ -1,5 +1,5 @@
 # OpenThread
-Cross-platform multi-threaded design!
+Cross-platform multi-threaded design!Three designed Model: Await Model, Factory Model and Actor Model.
 OpenThread is the most comfortable cross-platform multi-threaded concurrent library. 
 
 Using elegant methods to create threads, manage threads and communicate between threads to achieve multi-core concurrency. 
@@ -44,6 +44,15 @@ The technical features of OpenThread:
 
 4. Thread interaction data is managed using smart pointers to achieve automated memory management without worrying about memory leaks.
 
+5. Three major design patterns for multithreading: Await pattern, Worker pattern and Actor pattern.
+
+## Three major design patterns for multithreading development
+
+1. Await pattern. Two threads, one thread requests the other thread and blocks waiting; the other thread receives the request and returns data to wake up the first thread; the first thread wakes up and continues execution with the data.
+
+2. Worker pattern. Suitable for clients, create a certain number of worker threads to form a factory and provide a unique interface service to the outside.
+
+3. Actor pattern. Suitable for servers, one thread per Actor, different Actors are responsible for different functions.
 
 ## 1.Create Thread HelloWorld
 ```C++
@@ -71,10 +80,12 @@ int main()
 }
 ```
 
-## 2.Await operation
-Create an OpenSync object in the current thread, send the OpenSync object to the child thread like a message and block and wait. 
+## 2.Await Model
+Create an OpenSyncReturn object in the main thread, send it to the sub-thread and block waiting for the sub-thread to return. 
 
-After receiving the message, the child thread sends a message to wake up the blocked thread. Use the OpenSync object to block the current thread and have the child thread return data through OpenSync.
+After receiving the message, the sub-thread sends a message to wake up and sends an OpenSync object to the main thread, waiting for the main thread to respond. 
+
+After being awakened, the main thread receives the OpenSync object carried by the sub-thread message and wakes up the sub-thread.
 ```C++
 #include <assert.h>
 #include <iostream>
@@ -84,9 +95,14 @@ After receiving the message, the child thread sends a message to wake up the blo
 using namespace open;
 
 // Test1
+struct TestData
+{
+    std::string data_;
+};
 struct Test1Data
 {
     std::string data_;
+    OpenSync openSync_;
     ~Test1Data()
     {
         printf("Test1:~Test1Data\n");
@@ -96,31 +112,31 @@ struct Test1Data
 // Test1
 void Test1Thread(OpenThreadMsg& msg)
 {
-    //Thread start message
     if (msg.state_ == OpenThread::START)
     {
         printf("Test1Thread[%s] START\n", msg.name().c_str());
         OpenThread::Sleep(1000);
     }
-    //Message received by the thread
     else if (msg.state_ == OpenThread::RUN)
     {
-        //Received an OpenSync object, wake it up and send a message.
-        OpenSync* data = (OpenSync*)msg.data<OpenSync>();
+        // recevie msg
+        OpenSyncReturn<TestData, Test1Data>* data = msg.edit<OpenSyncReturn<TestData, Test1Data>>();
         if (data)
         {
-            const std::string* str = data->get<std::string>();
+            std::shared_ptr<TestData> str = data->get();
             if (str)
             {
-                assert(*str == "Waiting for you!");
+                assert(str->data_ == "Waiting for you!");
             }
             auto sptr = std::shared_ptr<Test1Data>(new Test1Data);
             sptr->data_.assign("Of Course,I Still Love You!");
             data->wakeup(sptr);
+
+            //wait receive
+            sptr->openSync_.await();
         }
         OpenThread::Sleep(1000);
     }
-    //Message before thread exit
     else if (msg.state_ == OpenThread::STOP)
     {
         printf("Test1Thread[%s] STOP\n", msg.name().c_str());
@@ -130,31 +146,31 @@ void Test1Thread(OpenThreadMsg& msg)
 
 int main()
 {
-    // Create a new OpenThread object with name "Test1Thread"
+    // create and start thread
     auto threadRef = OpenThread::Create("Test1Thread");
-    // Start the created OpenThread object and specify its execution function
     threadRef.start(Test1Thread);
 
-    // Create an OpenSync object
-    auto msg = std::shared_ptr<OpenSync>(new OpenSync);
-    // Create a string object to hold data
-    auto data = std::shared_ptr<std::string>(new std::string);
-    // Assign data to string object
-    data->assign("Waiting for you!");
-    // Put string object into OpenSync object
-    msg->put(data);
-    // Send OpenSync object to child thread
+    // send msg to thread
+    auto msg = std::shared_ptr<OpenSyncReturn<TestData, Test1Data>>(new OpenSyncReturn<TestData, Test1Data>);
+    {
+        auto data = std::shared_ptr<TestData>(new TestData);
+        data->data_ = "Waiting for you!";
+        msg->put(data);
+    }
     threadRef.send(msg);
-    // Wait for response from child thread
-    const Test1Data* ret = msg->awaitReturn<Test1Data>();
+    auto ret = msg->awaitReturn();
     if (ret)
     {
         assert(ret->data_ == "Of Course,I Still Love You!");
         printf("Test1====>>:%s\n", ret->data_.c_str());
+
+        //wake up wait.
+        ret->openSync_.wakeup();
     }
-    // Stop child thread
+    // stop thread
     threadRef.stop();
-    // Wait for child thread to exit
+
+    // wait stop
     OpenThread::ThreadJoin(threadRef);
     printf("Pause\n");
     return getchar();
@@ -401,7 +417,7 @@ int main()
 }
 ```
 
-## 5.Design a multi-threaded concurrent framework.
+## 5.Actor Model
 Use the Worker class to encapsulate OpenThread, one thread for one Worker business. 
 
 Inspector (monitor), Timer (timer) and Server (server) inherit from Worker. 
@@ -821,6 +837,128 @@ int main()
         delete vectWorker[i];
     }
     vectWorker.clear();
+    printf("Pause\n");
+    return getchar();
+}
+```
+
+## 6.Worker Model
+Create a certain number of worker threads to form a factory and provide a unique interface service to the outside.
+```C++
+#include <assert.h>
+#include <iostream>
+#include <stdio.h>
+#include <vector>
+#include "openthread.h"
+using namespace open;
+
+struct Product
+{
+    int id_;
+    std::string goods_;
+    Product() :id_(0) {}
+};
+class Worker : public OpenThreader
+{   
+    template <class T>
+    struct Task
+    {
+        std::shared_ptr<T> data_;
+        OpenSync openSync_;
+        Task() :data_(0) {}
+    };
+    //Factory
+    class Factory
+    {
+        const std::vector<Worker*> vectWorker_;
+    public:
+        Factory()
+        :vectWorker_({
+            new Worker("Producer1"),
+            new Worker("Producer2"),
+            new Worker("Producer3"),
+            new Worker("Producer4"),
+            }) {}
+        Worker* getWorker()
+        {
+            if (vectWorker_.empty()) return 0;
+            return vectWorker_[std::rand() % vectWorker_.size()];
+        }
+    };
+    static Factory Instance_;
+    // Worker
+    Worker(const std::string& name)
+        :OpenThreader(name)
+    {
+        uid_ = 1;
+        start();
+    }
+    ~Worker()
+    {
+        for (size_t i = 0; i < vectTask_.size(); ++i)
+            vectTask_[i].openSync_.wakeup();
+    }
+    virtual void onMsg(OpenThreadMsg& msg)
+    {
+        Task<Product>* task = msg.edit<Task<Product>>();
+        if (task)
+        {
+            vectTask_.push_back(*task);
+        }
+        if (rand() % 2 == 0)
+        {
+            OpenThread::Sleep(1000);
+        }
+        for (size_t i = 0; i < vectTask_.size(); ++i)
+        {
+            auto& task = vectTask_[i];
+            if (task.data_)
+            {
+                task.data_->id_ = pid_ + 100 * uid_++;
+                task.data_->goods_ = name_ + " Dog coin" + std::to_string(task.data_->id_);
+            }
+            task.openSync_.wakeup();
+        }
+        vectTask_.clear();
+    }
+    int uid_;
+    std::vector<Task<Product>> vectTask_;
+public:
+    static bool MakeProduct(std::shared_ptr<Product>& product)
+    {
+        auto worker = Instance_.getWorker();
+        if (!worker)  return false;
+        auto proto = std::shared_ptr<Task<Product>>(new Task<Product>);
+        proto->data_ = product;
+        bool ret = OpenThread::Send(worker->pid(), proto);
+        assert(ret);
+        proto->openSync_.await();
+        return ret;
+    }
+};
+Worker::Factory Worker::Instance_;
+
+void TestThread(OpenThreadMsg& msg)
+{
+    if (msg.state_ == OpenThread::START)
+    {
+        for (size_t i = 0; i < 100; i++)
+        {
+            auto product = std::shared_ptr<Product>(new Product());
+            Worker::MakeProduct(product);
+            printf("[%s] Recevie Product:%s\n", msg.name().c_str(), product->goods_.c_str());
+        }
+        msg.thread().stop();
+    }
+}
+int main()
+{
+    OpenThread::Create("TestThread1", TestThread);
+    OpenThread::Create("TestThread2", TestThread);
+    OpenThread::Create("TestThread3", TestThread);
+    OpenThread::Create("TestThread4", TestThread);
+    // wait stop
+    OpenThread::ThreadJoinAll();
     printf("Pause\n");
     return getchar();
 }

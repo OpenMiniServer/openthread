@@ -6,9 +6,14 @@
 using namespace open;
 
 // Test1
+struct TestData
+{
+    std::string data_;
+};
 struct Test1Data
 {
     std::string data_;
+    OpenSync openSync_;
     ~Test1Data()
     {
         printf("Test1:~Test1Data\n");
@@ -26,17 +31,20 @@ void Test1Thread(OpenThreadMsg& msg)
     else if (msg.state_ == OpenThread::RUN)
     {
         // recevie msg
-        OpenSync* data = (OpenSync*)msg.data<OpenSync>();
+        OpenSyncReturn<TestData, Test1Data>* data = msg.edit<OpenSyncReturn<TestData, Test1Data>>();
         if (data)
         {
-            const std::string* str = data->get<std::string>();
+            std::shared_ptr<TestData> str = data->get();
             if (str)
             {
-                assert(*str == "Waiting for you!");
+                assert(str->data_ == "Waiting for you!");
             }
             auto sptr = std::shared_ptr<Test1Data>(new Test1Data);
             sptr->data_.assign("Of Course,I Still Love You!");
             data->wakeup(sptr);
+
+            //wait receive
+            sptr->openSync_.await();
         }
         OpenThread::Sleep(1000);
     }
@@ -54,16 +62,21 @@ int main()
     threadRef.start(Test1Thread);
 
     // send msg to thread
-    auto msg = std::shared_ptr<OpenSync>(new OpenSync);
-    auto data = std::shared_ptr<std::string>(new std::string);
-    data->assign("Waiting for you!");
-    msg->put(data);
+    auto msg = std::shared_ptr<OpenSyncReturn<TestData, Test1Data>>(new OpenSyncReturn<TestData, Test1Data>);
+    {
+        auto data = std::shared_ptr<TestData>(new TestData);
+        data->data_ = "Waiting for you!";
+        msg->put(data);
+    }
     threadRef.send(msg);
-    const Test1Data* ret = msg->awaitReturn<Test1Data>();
+    auto ret = msg->awaitReturn();
     if (ret)
     {
         assert(ret->data_ == "Of Course,I Still Love You!");
         printf("Test1====>>:%s\n", ret->data_.c_str());
+
+        //wake up wait.
+        ret->openSync_.wakeup();
     }
     // stop thread
     threadRef.stop();
