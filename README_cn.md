@@ -1,5 +1,5 @@
 # OpenThread
-OpenThread是最舒心的跨平台多线程并发库，多线程三大设计模式: Await模式, Factory模式和Actor模式。
+OpenThread是最舒心的跨平台多线程并发库，多线程三大设计模式: Await模式, Worker模式和Actor模式。
 
 使用优雅的方式，创建线程、管理线程和线程间通信，从而实现多核并发。
 

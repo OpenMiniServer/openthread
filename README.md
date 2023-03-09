@@ -1,5 +1,5 @@
 # OpenThread
-Cross-platform multi-threaded design!Three designed Model: Await Model, Factory Model and Actor Model.
+Cross-platform multi-threaded design!Three designed pattern: Await pattern, Worker pattern and Actor pattern.
 OpenThread is the most comfortable cross-platform multi-threaded concurrent library. 
 
 Using elegant methods to create threads, manage threads and communicate between threads to achieve multi-core concurrency. 
