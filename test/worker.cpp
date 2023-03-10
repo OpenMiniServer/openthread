@@ -10,17 +10,20 @@ struct Product
 {
     int id_;
     std::string goods_;
-    Product() :id_(0) {}
+    Product():id_(0) {}
 };
-class Worker : public OpenThreader
+
+struct ProtoTask : public OpenThreadProto
+{
+    std::shared_ptr<Product> data_;
+    OpenSync openSync_;
+
+    static inline int ProtoType() { return 1; }
+    virtual inline int protoType() const { return ProtoTask::ProtoType(); }
+};
+
+class Worker : public OpenThreadWorker
 {   
-    template <class T>
-    struct Task
-    {
-        std::shared_ptr<T> data_;
-        OpenSync openSync_;
-        Task() :data_(0) {}
-    };
     //Factory
     class Factory
     {
@@ -43,8 +46,9 @@ class Worker : public OpenThreader
 
     // Worker
     Worker(const std::string& name)
-        :OpenThreader(name)
+        :OpenThreadWorker(name)
     {
+        mapHandle_[ProtoTask::ProtoType()] = (OpenThreadHandle)&Worker::makeProduct;
         uid_ = 1;
         start();
     }
@@ -55,13 +59,9 @@ class Worker : public OpenThreader
             vectTask_[i].openSync_.wakeup();
         }
     }
-    virtual void onMsg(OpenThreadMsg& msg)
+    void makeProduct(const ProtoTask& proto)
     {
-        Task<Product>* task = msg.edit<Task<Product>>();
-        if (task)
-        {
-            vectTask_.push_back(*task);
-        }
+        vectTask_.push_back(proto);
         if (rand() % 2 == 0)
         {
             OpenThread::Sleep(1000);
@@ -78,17 +78,16 @@ class Worker : public OpenThreader
         }
         vectTask_.clear();
     }
-
     int uid_;
-    std::vector<Task<Product>> vectTask_;
+    std::vector<ProtoTask> vectTask_;
 public:
     static bool MakeProduct(std::shared_ptr<Product>& product)
     {
         auto worker = Instance_.getWorker();
         if (!worker)  return false;
-        auto proto = std::shared_ptr<Task<Product>>(new Task<Product>);
+        auto proto = std::shared_ptr<ProtoTask>(new ProtoTask);
         proto->data_ = product;
-        bool ret = OpenThread::Send(worker->pid(), proto);
+        bool ret = worker->send(-1, proto);
         assert(ret);
         proto->openSync_.await();
         return ret;

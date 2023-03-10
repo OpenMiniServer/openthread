@@ -1279,6 +1279,92 @@ const std::string& OpenThreadRef::name()
     return ptr ? ptr->name() : Empty;
 }
 
+bool OpenThreadWorker::send(int pid, const std::shared_ptr<void>& data)
+{
+    if (!data)
+    {
+        assert(false);
+        return false;
+    }
+    if (pid < 0)
+    {
+        assert(false);
+        return false;
+    }
+    OpenThreadProto* proto = dynamic_cast<OpenThreadProto*>((OpenThreadProto*)data.get());
+    if (proto)
+    {
+        proto->srcPid_ = pid_;
+        proto->srcName_ = name_;
+    }
+    return OpenThread::Send(pid, data);
+}
+
+bool OpenThreadWorker::send(std::vector<int>& vectPid, const std::shared_ptr<void>& data)
+{
+    if (!data)
+    {
+        assert(false);
+        return false;
+    }
+    OpenThreadProto* proto = dynamic_cast<OpenThreadProto*>((OpenThreadProto*)data.get());
+    if (proto)
+    {
+        proto->srcPid_ = pid_;
+        proto->srcName_ = name_;
+    }
+    return OpenThread::Send(vectPid, data);
+}
+
+bool OpenThreadWorker::sendLoop(const std::shared_ptr<void>& data)
+{
+    if (!data)
+    {
+        assert(false);
+        return false;
+    }
+    OpenThreadProto* proto = dynamic_cast<OpenThreadProto*>((OpenThreadProto*)data.get());
+    if (proto)
+    {
+        proto->srcPid_ = pid_;
+        proto->srcName_ = name_;
+    }
+    return OpenThread::Send(pid_, data);
+}
+
+bool OpenThreadWorker::Send(int pid, const std::shared_ptr<void>& data)
+{
+    if (!data)
+    {
+        assert(false);
+        return false;
+    }
+    if (pid < 0)
+    {
+        assert(false);
+        return false;
+    }
+    OpenThreadProto* proto = dynamic_cast<OpenThreadProto*>((OpenThreadProto*)data.get());
+    if (proto)
+    {
+        proto->srcPid_ = -1;
+    }
+    return OpenThread::Send(pid, data);
+}
+
+void OpenThreadWorker::onMsg(OpenThreadMsg& msg)
+{
+    const OpenThreadProto* proto = msg.data<OpenThreadProto>();
+    if (!proto) return;
+    std::map<int, OpenThreadHandle>::iterator iter = mapHandle_.find(proto->protoType());
+    if (iter != mapHandle_.end())
+    {
+        (this->*iter->second)(*proto);
+        return;
+    }
+    assert(false);
+}
+
 
 //OpenSync
 OpenSync::OpenSyncRef::OpenSyncRef()
@@ -1325,20 +1411,6 @@ bool OpenSync::OpenSyncRef::wakeup()
     }
     return false;
 }
-
-//bool OpenSync::OpenSyncRef::wakeup(const std::shared_ptr<void>& data)
-//{
-//    if (isSleep_)
-//    {
-//        isSleep_ = 0;
-//        destData_ = data;
-//        pthread_cond_signal(&cond_);
-//        return true;
-//    }
-//    return false;
-//}
-
-
 
 void OpenThread::Sleep(int64_t milliSecond)
 {

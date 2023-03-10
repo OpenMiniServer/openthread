@@ -4,245 +4,173 @@
 #include <map>
 #include <unordered_map>
 #include "openthread.h"
-
 using namespace open;
 
-
-struct ProtoBuffer
+class ProtoBuffer : public OpenThreadProto
 {
-    virtual ~ProtoBuffer() {}
-};
-
-class Data
-{
-    ProtoBuffer* proto_;
+    void* data_;
 public:
-    Data() :proto_(0), srcPid_(-1) {}
-    Data(int pid, const std::string& name, const std::string& key, ProtoBuffer* proto)
-        :srcPid_(pid), srcName_(name), rpc_(key), proto_(proto) {}
-    ~Data()
-    {
-        if (proto_) delete proto_;
-        proto_ = 0;
-    }
-    int srcPid_;
-    std::string rpc_;
-    std::string srcName_;
+    int dataType_;
+    ProtoBuffer() 
+        : OpenThreadProto()
+        ,dataType_(0)
+        ,data_(0){}
+    virtual ~ProtoBuffer() { if (data_) delete data_; }
     template <class T>
-    const T& proto() const 
-    {
-        T* p = dynamic_cast<T*>(proto_);
-        if (p) return *p;
-        static T Empty_;
-        return Empty_;
-    }
-};
-
-class Worker;
-typedef void(Worker::*Handle)(const Data&);
-struct Rpc
-{
-    Handle handle_;
-};
-class Worker:public OpenThreader
-{
-public:
-    Worker(const std::string& name)
-        :OpenThreader(name)
-    {
-        mapKeyFunc_["msg_from_main"] = { (Handle)&Worker::msg_from_main };
-    }
-    virtual ~Worker() {}
-    virtual bool start()
-    {
-        return OpenThreader::start();
-    }
-
-    void msg_from_main(const Data& data)
-    {
-    }
-
-    void onData(const Data& data)
-    {
-        printf("[%s]receive<<=[%s] key:%s\n", name_.c_str(), data.srcName_.c_str(), data.rpc_.c_str());
-        auto iter = mapKeyFunc_.find(data.rpc_);
-        if (iter != mapKeyFunc_.end())
+    inline T& data() 
+    { 
+        T* t = 0;
+        if (data_)
         {
-            auto& rpc = iter->second;
-            if (rpc.handle_)
-            {
-                (this->*rpc.handle_)(data);
-                return;
-            }
+            t = dynamic_cast<T*>((T*)data_);
+            if (data_ == t) return *t;
+            delete data_;
         }
-        printf("[%s]no implement key:%s\n", name_.c_str(), data.rpc_.c_str());
+        t = new T;
+        data_ = t;
+        return *t;
     }
-    virtual void onMsg(OpenThreadMsg& msg)
+    template <class T>
+    inline T& data() const
     {
-        const Data* data = msg.data<Data>();
-        if (data) onData(*data);
+        if (data_)
+        {
+            T* t = dynamic_cast<T*>((T*)data_);
+            if (data_ == t) return *t;
+        }
+        assert(false);
+        static T t;
+        return t;
     }
-    // proto will be delete
-    bool send(int sid, const std::string& key, ProtoBuffer* proto)
-    {
-        printf("[%s]send=>[%s] key:%s\n", name_.c_str(), ThreadName(sid).c_str(), key.c_str());
-        auto data = std::shared_ptr<Data>(new Data(pid(), name_, key, proto));
-        bool ret = OpenThread::Send(sid, data);
-        //assert(ret);
-        return ret;
-    }
-    // proto will be delete
-    bool send(const std::string& name, const std::string& key, ProtoBuffer* proto)
-    {
-        printf("[%s]send=>[%s] key:%s\n", name_.c_str(), name.c_str(), key.c_str());
-        auto data = std::shared_ptr<Data>(new Data(pid(), name_, key, proto));
-        bool ret = OpenThread::Send(name, data);
-        //assert(ret);
-        return ret;
-    }
-    bool send(std::vector<int>& vectSid, const std::string& key, ProtoBuffer* proto)
-    {
-        printf("[%s]send=>size[%d] key:%s\n", name_.c_str(), (int)vectSid.size(), key.c_str());
-        auto data = std::shared_ptr<Data>(new Data(pid(), name_, key, proto));
-        bool ret = OpenThread::Send(vectSid, data);
-        //assert(ret);
-        return ret;
-    }
-    bool send(std::vector<std::string>& vectName, const std::string& key, ProtoBuffer* proto)
-    {
-        printf("[%s]send=>size[%d] key:%s\n", name_.c_str(), (int)vectName.size(), key.c_str());
-        auto data = std::shared_ptr<Data>(new Data(pid(), name_, key, proto));
-        bool ret = OpenThread::Send(vectName, data);
-        //assert(ret);
-        return ret;
-    }
-    virtual void stop()
-    {
-        OpenThreader::stop();
-    }
-    static bool Send(std::vector<std::string>& vectName, const std::string& key, ProtoBuffer* proto)
-    {
-        printf("Send=>size[%d] key:%s\n", (int)vectName.size(), key.c_str());
-        auto data = std::shared_ptr<Data>(new Data(-1, "Global", key, proto));
-        bool ret = OpenThread::Send(vectName, data);
-        assert(ret);
-        return ret;
-    }
-protected:
-    void sendLoop(const std::string& key)
-    {
-        auto proto = new ProtoBuffer;
-        send(pid(), key, proto);
-    }
-    bool canLoop()
-    {
-        OpenThread* p = thread_.get();
-        return p ? (p->isRunning() && !p->hasMsg()) : false;
-    }
-    std::unordered_map<std::string, Rpc> mapKeyFunc_;
+    static inline int ProtoType() { return (int)(uintptr_t) & (ProtoType); }
+    virtual inline int protoType() const { return ProtoBuffer::ProtoType(); }
 };
 
-struct TimerEventMsg :public ProtoBuffer
+struct ProtoLoop : public OpenThreadProto
+{
+    int type_;
+    ProtoLoop() :type_(-1) {}
+    static inline int ProtoType() { return (int)(uintptr_t) & (ProtoType); }
+    virtual inline int protoType() const { return ProtoLoop::ProtoType(); }
+};
+
+struct TimerEventMsg
 {
     int workerId_;
     int64_t deadline_;
+    TimerEventMsg() : workerId_(0), deadline_(0) {}
 };
 
-struct TimerInfoMsg :public ProtoBuffer
+struct TimerInfoMsg
 {
-    TimerInfoMsg() 
-        :workerId_(0), leftCount_(0), cpuCost_(0), dataTime_(0) {}
     int workerId_;
     size_t leftCount_;
     int64_t cpuCost_;
     int64_t dataTime_;
+    TimerInfoMsg() : workerId_(0), leftCount_(0), cpuCost_(0), dataTime_(0) {}
 };
 
-class Inspector:public Worker
+enum EMsgId
+{
+    query_timer_info,
+    get_timer_info,
+    request_timer,
+};
+
+class Inspector : public OpenThreadWorker
 {
     std::unordered_map<std::string, TimerInfoMsg> mapTimerInfo_;
     std::vector<int> vectQueryId;
 public:
-    Inspector(const std::string& name):Worker(name)
+    Inspector(const std::string& name):OpenThreadWorker(name)
     {
-        mapKeyFunc_["start_inspect"] = { (Handle)&Inspector::start_inspect };
-        mapKeyFunc_["query_timer_info"] = { (Handle)&Inspector::query_timer_info };
-        mapKeyFunc_["return_timer_info"] = { (Handle)&Inspector::return_timer_info };
+        registers(ProtoLoop::ProtoType(), (OpenThreadHandle)&Inspector::onProtoLoop);
+        registers(ProtoBuffer::ProtoType(), (OpenThreadHandle)&Inspector::onProtoBuffer);
     }
-    virtual void onStart()
+    virtual void onStart() {}
+private:
+    void onProtoLoop(const ProtoLoop& proto)
     {
-    }
-    void start_inspect(const Data& data)
-    {
+        printf("Inspector::onProtoLoop[%s]Recevie<<==[%s]\n", name_.c_str(), proto.srcName_.c_str());
         std::vector<int> vectPid;
         vectPid.reserve(mapTimerInfo_.size());
         for (auto iter = mapTimerInfo_.begin(); iter != mapTimerInfo_.end(); iter++)
         {
-            if(iter->second.workerId_ >= 0)
+            if (iter->second.workerId_ >= 0)
                 vectPid.push_back(iter->second.workerId_);
         }
-        auto proto = new ProtoBuffer;
-        send(vectPid, "get_timer_info", proto);
+        auto root = std::shared_ptr<ProtoBuffer>(new ProtoBuffer);
+        root->dataType_ = get_timer_info;
+        send(vectPid, root);
     }
-
-    void return_timer_info(const Data& data)
+    void onProtoBuffer(const ProtoBuffer& proto)
     {
-        auto& proto = data.proto<TimerInfoMsg>();
-        auto& timerInfo = mapTimerInfo_[data.srcName_];
-        timerInfo = proto;
-        if (!vectQueryId.empty())
+        printf("Inspector::onProtoBuffer[%s]Recevie<<==[%s]\n", name_.c_str(), proto.srcName_.c_str());
+        if (proto.dataType_ == get_timer_info)
         {
-            auto data = new TimerInfoMsg;
-            *data = proto;
-            send(vectQueryId, "query_timer_info", data);
-            vectQueryId.clear();
-        }
-    }
-    void query_timer_info(const Data& data)
-    {
-        TimerInfoMsg* tmpInfo = 0;
-        auto curTime = OpenThread::MilliUnixtime();
-        for (auto iter = mapTimerInfo_.begin(); iter != mapTimerInfo_.end(); iter++)
-        {
-            auto& info = iter->second;
-            if (curTime > info.dataTime_ + 10000) continue;
-            if (tmpInfo)
+            auto& msg = proto.data<TimerInfoMsg>();
+            auto& timerInfo = mapTimerInfo_[proto.srcName_];
+            timerInfo = msg;
+            if (!vectQueryId.empty())
             {
-                if (tmpInfo->leftCount_ > info.leftCount_ || tmpInfo->cpuCost_ > info.cpuCost_)
+                auto root = std::shared_ptr<ProtoBuffer>(new ProtoBuffer);
+                root->dataType_ = query_timer_info;
+                auto& info = root->data<TimerInfoMsg>();
+                info = timerInfo;
+                send(vectQueryId, root);
+
+                vectQueryId.clear();
+            }
+        }
+        else if (proto.dataType_ == query_timer_info)
+        {
+            TimerInfoMsg* tmpInfo = 0;
+            auto curTime = OpenThread::MilliUnixtime();
+            for (auto iter = mapTimerInfo_.begin(); iter != mapTimerInfo_.end(); iter++)
+            {
+                auto& info = iter->second;
+                if (curTime > info.dataTime_ + 10000) continue;
+                if (tmpInfo)
+                {
+                    if (tmpInfo->leftCount_ > info.leftCount_ || tmpInfo->cpuCost_ > info.cpuCost_)
+                        tmpInfo = &info;
+                }
+                else
+                {
                     tmpInfo = &info;
+                }
+            }
+            if (!tmpInfo)
+            {
+                vectQueryId.push_back(proto.srcPid_);
+                auto root = std::shared_ptr<ProtoLoop>(new ProtoLoop);
+                sendLoop(root);
             }
             else
             {
-                tmpInfo = &info;
+                auto root = std::shared_ptr<ProtoBuffer>(new ProtoBuffer);
+                root->dataType_ = query_timer_info;
+                auto& info = root->data<TimerInfoMsg>();
+                info = *tmpInfo;
+                send(proto.srcPid_, root);
             }
-        }
-        if (!tmpInfo)
-        {
-            vectQueryId.push_back(data.srcPid_);
-            sendLoop("start_inspect");
-        }
-        else
-        {
-            auto proto = new TimerInfoMsg;
-            *proto = *tmpInfo;
-            send(data.srcPid_, "query_timer_info", proto);
         }
     }
 };
 
 
-class Timer:public Worker
+class Timer:public OpenThreadWorker
 {
     int inspectorId_;
-    std::multimap<int64_t, int> mapTimerEvent;
+    std::multimap<int64_t, int> mapTimerEvent_;
 public:
-    Timer(const std::string& name):Worker(name) 
+    Timer(const std::string& name):OpenThreadWorker(name)
     {
         inspectorId_ = -1;
-        mapKeyFunc_["start_timer"] = { (Handle)&Timer::start_timer };
-        mapKeyFunc_["get_timer_info"] = { (Handle)&Timer::get_timer_info };
-        mapKeyFunc_["request_timer"] = { (Handle)&Timer::request_timer };
+        registers(ProtoLoop::ProtoType(), (OpenThreadHandle)&Timer::onProtoLoop);
+        registers(ProtoBuffer::ProtoType(), (OpenThreadHandle)&Timer::onProtoBuffer);
     }
+protected:
     virtual void onStart()
     {
         while (inspectorId_ < 0)
@@ -250,37 +178,47 @@ public:
             inspectorId_ = ThreadId("Inspector");
             if (inspectorId_ >= 0)
             {
-                auto proto = new TimerInfoMsg;
-                proto->workerId_ = pid();
-                proto->dataTime_ = OpenThread::MilliUnixtime();
-                proto->cpuCost_ = thread_->cpuCost();
-                proto->leftCount_ = thread_->leftCount();
-                send(inspectorId_, "return_timer_info", proto);
+                auto root = std::shared_ptr<ProtoBuffer>(new ProtoBuffer);
+                root->dataType_ = get_timer_info;
+                auto& msg = root->data<TimerInfoMsg>();
+                msg.workerId_ = pid();
+                msg.dataTime_ = OpenThread::MilliUnixtime();
+                msg.cpuCost_ = thread_->cpuCost();
+                msg.leftCount_ = thread_->leftCount();
+
+                send(inspectorId_, root);
                 break;
             }
             OpenThread::Sleep(100);
         }
-        sendLoop("start_timer");
+        auto root = std::shared_ptr<ProtoLoop>(new ProtoLoop);
+        sendLoop(root);
     }
-    void start_timer(const Data& data)
+private:
+    void onProtoLoop(const ProtoLoop& proto)
     {
+        printf("Timer::onProtoLoop[%s]Recevie<<==[%s]\n", name_.c_str(), proto.srcName_.c_str());
+        assert(proto.srcPid_ == pid_);
         int64_t curTime = 0;
         while (canLoop())
         {
-            if (!mapTimerEvent.empty())
+            if (!mapTimerEvent_.empty())
             {
                 curTime = OpenThread::MilliUnixtime();
-                while (!mapTimerEvent.empty())
+                while (!mapTimerEvent_.empty())
                 {
-                    auto iter = mapTimerEvent.begin();
+                    auto iter = mapTimerEvent_.begin();
                     if (curTime > iter->first)
                     {
-                        auto proto = new TimerEventMsg;
-                        proto->workerId_ = pid();
-                        proto->deadline_ = curTime;
-                        send(iter->second, "return_timer", proto);
+                        auto root = std::shared_ptr<ProtoBuffer>(new ProtoBuffer);
+                        root->dataType_ = request_timer;
+                        auto& msg = root->data<TimerEventMsg>();
+                        msg.workerId_ = pid();
+                        msg.deadline_ = curTime;
 
-                        mapTimerEvent.erase(iter);
+                        send(iter->second, root);
+
+                        mapTimerEvent_.erase(iter);
                     }
                     else
                     {
@@ -291,121 +229,121 @@ public:
             OpenThread::Sleep(10);
         }
     }
-    // provide timer info
-    void get_timer_info(const Data& data)
+    void onProtoBuffer(const ProtoBuffer& proto)
     {
-        auto proto = new TimerInfoMsg;
-        proto->workerId_  = pid();
-        proto->dataTime_  = OpenThread::MilliUnixtime();
-        proto->cpuCost_   = thread_->cpuCost();
-        proto->leftCount_ = thread_->leftCount();
-        send(data.srcPid_, "return_timer_info", proto);
-        sendLoop("start_timer");
-    }
-    void request_timer(const Data& data)
-    {
-        auto& proto = data.proto<TimerEventMsg>();
-        mapTimerEvent.insert({ proto.deadline_, data.srcPid_ });
-        sendLoop("start_timer");
+        printf("Timer::onProtoBuffer[%s]Recevie<<==[%s]\n", name_.c_str(), proto.srcName_.c_str());
+        if (proto.dataType_ == get_timer_info)
+        {
+            auto root = std::shared_ptr<ProtoBuffer>(new ProtoBuffer);
+            root->dataType_ = get_timer_info;
+            auto& msg = root->data<TimerInfoMsg>();
+            msg.workerId_ = pid();
+            msg.dataTime_  = OpenThread::MilliUnixtime();
+            msg.cpuCost_   = thread_->cpuCost();
+            msg.leftCount_ = thread_->leftCount();
+            send(proto.srcPid_, root);
+
+            auto sptr = std::shared_ptr<ProtoLoop>(new ProtoLoop);
+            sendLoop(sptr);
+        }
+        else if (proto.dataType_ == request_timer)
+        {
+            auto& msg = proto.data<TimerEventMsg>();
+            mapTimerEvent_.insert({ msg.deadline_, proto.srcPid_ });
+
+            auto sptr = std::shared_ptr<ProtoLoop>(new ProtoLoop);
+            sendLoop(sptr);
+        }
     }
 };
 
-class Server:public Worker
+class Server:public OpenThreadWorker
 {
     int inspectorId_;
     int collect_;
 public:
     Server(const std::string& name)
-        :Worker(name) 
+        :OpenThreadWorker(name)
         ,inspectorId_(-1)
     {
         collect_ = 0;
-        mapKeyFunc_["start_work"] = { (Handle)&Server::start_work };
-        mapKeyFunc_["query_timer_info"] = { (Handle)&Server::query_timer_info };
-        mapKeyFunc_["return_timer"] = { (Handle)&Server::return_timer };
+        registers(ProtoLoop::ProtoType(), (OpenThreadHandle)&Server::onProtoLoop);
+        registers(ProtoBuffer::ProtoType(), (OpenThreadHandle)&Server::onProtoBuffer);
     }
-    int inspectorId()
-    {
-        if (inspectorId_ < 0)
-        {
-            inspectorId_ = ThreadId("Inspector");
-        }
-        return inspectorId_;
-    }
+protected:
     virtual void onStart()
     {
         while (inspectorId_ < 0)
         {
             inspectorId_ = ThreadId("Inspector");
-            OpenThread::Sleep(100);
+            OpenThread::Sleep(10);
         }
-        sendLoop("start_work");
+        auto sptr = std::shared_ptr<ProtoLoop>(new ProtoLoop);
+        sendLoop(sptr);
     }
-    void start_work(const Data& data)
+private:
+    void onProtoLoop(const ProtoLoop& proto)
     {
-        while (true)
+        printf("Server::onProtoLoop[%s]Recevie<<==[%s]\n", name_.c_str(), proto.srcName_.c_str());
+        auto root = std::shared_ptr<ProtoBuffer>(new ProtoBuffer);
+        root->dataType_ = query_timer_info;
+        send(inspectorId_, root);
+    }
+
+    void onProtoBuffer(const ProtoBuffer& proto)
+    {
+        printf("Server::onProtoBuffer[%s]Recevie<<==[%s]\n", name_.c_str(), proto.srcName_.c_str());
+        if (proto.dataType_ == query_timer_info)
         {
-            int wid = inspectorId();
-            if (wid >= 0)
+            auto& msg = proto.data<TimerInfoMsg>();
+            if (msg.workerId_ > 0)
             {
-                auto proto = new ProtoBuffer;
-                send(wid, "query_timer_info", proto);
-                break;
+                auto root = std::shared_ptr<ProtoBuffer>(new ProtoBuffer);
+                root->dataType_ = request_timer;
+                auto& event = root->data<TimerEventMsg>();
+                int64_t curTime = OpenThread::MilliUnixtime();
+                event.deadline_ = curTime + curTime % 2000;
+                if (event.deadline_ > curTime + 2000)
+                {
+                    event.deadline_ = curTime;
+                }
+                send(msg.workerId_, root);
             }
-            OpenThread::Sleep(1000);
-        }
-    }
-    void query_timer_info(const Data& data)
-    {
-        auto& proto = data.proto<TimerInfoMsg>();
-        if (proto.workerId_ > 0)
-        {
-            auto data = new TimerEventMsg;
-            int64_t curTime = OpenThread::MilliUnixtime();
-            data->deadline_ = curTime + curTime % 2000;
-            if (data->deadline_ > curTime + 2000)
+            else
             {
-                data->deadline_ = curTime;
+                auto sptr = std::shared_ptr<ProtoLoop>(new ProtoLoop);
+                sendLoop(sptr);
             }
-            send(proto.workerId_, "request_timer", data);
         }
-        else
+        else if (proto.dataType_ == request_timer)
         {
-            sendLoop("start_work");
+            if (collect_++ > 100)
+            {
+                OpenThread::StopAll();
+                return;
+            }
+            sendLoop(std::shared_ptr<ProtoLoop>(new ProtoLoop));
         }
     }
-    void return_timer(const Data& data)
-    {
-        if (collect_++ > 100)
-        {
-            OpenThread::StopAll();
-            return;
-        }
-        sendLoop("start_work");
-    }
-    
 };
 
 int main()
 {
     OpenThread::StopAll();
-    std::vector<Worker*> vectWorker =
+    std::vector<OpenThreadWorker*> vectWorker =
     {
         new Inspector("Inspector"),
         new Timer("timer1"),
         new Timer("timer2"),
         new Server("server1"),
-        new Server("server2")
+        new Server("server2"),
+        new Server("server3"),
+        new Server("server4")
     };
-    std::vector<std::string> vectName;
     for (size_t i = 0; i < vectWorker.size(); i++)
     {
-        vectName.push_back(vectWorker[i]->name());
         vectWorker[i]->start();
     }
-    // all working, send "msg_from_main" msg;
-    auto msg = new ProtoBuffer;
-    Worker::Send(vectName, "msg_from_main", msg);
 
     OpenThread::ThreadJoinAll();
     for (size_t i = 0; i < vectWorker.size(); i++)
