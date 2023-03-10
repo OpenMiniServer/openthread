@@ -423,26 +423,26 @@ using namespace open;
 
 class ProtoBuffer : public OpenThreadProto
 {
-    void* data_;
+    std::shared_ptr<void> data_;
 public:
     int dataType_;
     ProtoBuffer() 
         : OpenThreadProto()
         ,dataType_(0)
         ,data_(0){}
-    virtual ~ProtoBuffer() { if (data_) delete data_; }
+    virtual ~ProtoBuffer() {}
     template <class T>
     inline T& data() 
     { 
         T* t = 0;
         if (data_)
         {
-            t = dynamic_cast<T*>((T*)data_);
-            if (data_ == t) return *t;
-            delete data_;
+            t = dynamic_cast<T*>((T*)data_.get());
+            if (data_.get() == t) return *t;
+            data_.reset();
         }
         t = new T;
-        data_ = t;
+        data_ = std::shared_ptr<T>(t);
         return *t;
     }
     template <class T>
@@ -450,8 +450,8 @@ public:
     {
         if (data_)
         {
-            T* t = dynamic_cast<T*>((T*)data_);
-            if (data_ == t) return *t;
+            T* t = dynamic_cast<T*>((T*)data_.get());
+            if (data_.get() == t) return *t;
         }
         assert(false);
         static T t;
