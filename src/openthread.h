@@ -351,9 +351,13 @@ struct OpenThreadProto
 {
     int srcPid_;
     std::string srcName_;
+
     OpenThreadProto() :srcPid_(-1) {}
     int srcPid() { return srcPid_; }
     const std::string& srcName() { return srcName_; }
+    int srcPid() const { return srcPid_; }
+    const std::string& srcName() const { return srcName_; }
+
     static inline int ProtoType() { return -1; }
     //implement
     virtual inline int protoType() const { assert(false); return OpenThreadProto::ProtoType(); }
