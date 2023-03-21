@@ -335,8 +335,8 @@ public:
     virtual void onStart() { }
     virtual void onMsg(OpenThreadMsg& msg) { }
     virtual void onStop() { }
-    const inline int pid() { return pid_; }
-    const std::string& name() { return name_; }
+    inline const int pid() { return pid_; }
+    inline const std::string& name() { return name_; }
     static void Thread(OpenThreadMsg& msg);
     static inline int ThreadId(const std::string& name) { return OpenThread::ThreadId(name); }
     static inline const std::string& ThreadName(int pid) { return OpenThread::ThreadName(pid); }
