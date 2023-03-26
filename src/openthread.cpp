@@ -31,6 +31,9 @@ extern "C" {
 #else 
  #include <unistd.h>
 #include <sys/time.h>
+#ifndef _GNU_SOURCE
+#include <sys/prctl.h>
+#endif
 #endif
 
 namespace open
@@ -316,7 +319,15 @@ void OpenThread::Run(void* arg)
         delete ptr;
         return;
     }
+#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
     pthread_setname_np((*ptr)->threadId_, (*ptr)->name_.c_str());
+#else
+#ifdef _GNU_SOURCE
+    pthread_setname_np((*ptr)->threadId_, (*ptr)->name_.c_str());
+#else
+    prctl(PR_SET_NAME, (unsigned long)(*ptr)->name_.c_str());
+#endif
+#endif
     (*ptr)->run();
     delete ptr;
 }
@@ -1424,9 +1435,25 @@ void OpenThread::Sleep(int64_t milliSecond)
 int64_t OpenThread::MilliUnixtime()
 {
 #if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
-    int64_t ft = 0;
-    ::GetSystemTimeAsFileTime((LPFILETIME)&ft);
-    int64_t milliSecond = (ft / 10000000 - 11644473600LL) * 1000 + (ft / 10) % 1000000;
+    //int64_t ft = 0;
+    //::GetSystemTimeAsFileTime((LPFILETIME)&ft);
+    //int64_t milliSecond = (ft / 10000000 - 11644473600LL) * 1000 + (ft / 10) % 1000000;
+    //return milliSecond;
+    SYSTEMTIME wtm;
+    GetLocalTime(&wtm);
+    struct tm tm;
+    tm.tm_year = wtm.wYear - 1900;
+    tm.tm_mon = wtm.wMonth - 1;
+    tm.tm_mday = wtm.wDay;
+    tm.tm_hour = wtm.wHour;
+    tm.tm_min = wtm.wMinute;
+    tm.tm_sec = wtm.wSecond;
+    tm.tm_isdst = -1;
+    time_t clock = mktime(&tm);
+    struct timeval tv;
+    tv.tv_sec = (long)clock;
+    tv.tv_usec = wtm.wMilliseconds * 1000;
+    int64_t milliSecond = ((unsigned long long)tv.tv_sec * 1000 + (unsigned long long)tv.tv_usec / 1000);
     return milliSecond;
 #else
     struct timeval tv;

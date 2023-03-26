@@ -353,6 +353,7 @@ struct OpenThreadProto
     std::string srcName_;
 
     OpenThreadProto() :srcPid_(-1) {}
+    virtual ~OpenThreadProto() {}
     int srcPid() { return srcPid_; }
     const std::string& srcName() { return srcName_; }
     int srcPid() const { return srcPid_; }
