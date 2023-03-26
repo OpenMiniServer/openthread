@@ -66,6 +66,52 @@ typedef struct pthread_key_t_ pthread_key_t;
 namespace open
 {
 
+#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
+
+class OpenSpinLock
+{
+    std::atomic_flag flag_;
+    OpenSpinLock(const OpenSpinLock&) {};
+    void operator=(const OpenSpinLock) {};
+public:
+    OpenSpinLock() {};
+    inline void lock() { while (flag_.test_and_set(std::memory_order_acquire)); }
+    inline void unlock() { flag_.clear(std::memory_order_release); }
+};
+
+#else
+
+class OpenSpinLock 
+{
+    int lock_;
+    OpenSpinLock(const OpenSpinLock&) {};
+    void operator=(const OpenSpinLock) {};
+public:
+    OpenSpinLock()
+    {
+        lock_ = 0;
+    }
+    ~OpenSpinLock()
+    {
+        lock_ = 0;
+    }
+    inline void lock() 
+    {
+        while (__sync_lock_test_and_set(&lock_, 1)) {}
+    }
+    inline int trylock() 
+    {
+        return __sync_lock_test_and_set(&lock_, 1) == 0;
+    }
+    inline void unlock() 
+    {
+        __sync_lock_release(&lock_);
+    }
+};
+
+#endif
+
+
 class OpenThreadRef;
 class OpenThreadPool;
 
@@ -108,8 +154,8 @@ public:
     bool isCurrent();
     void waitIdle();
 
-	inline bool isIdle() { return isIdle_; }
-	inline bool isRunning() { return state_ == RUN; }
+    inline bool isIdle() { return isIdle_; }
+    inline bool isRunning() { return state_ == RUN; }
     inline State state() { return state_; }
 
     inline int pid() { return pid_; }
@@ -124,9 +170,9 @@ public:
     { 
         return std::shared_ptr<T>(new T); 
     }
-	static bool Init(size_t capacity = 256, bool profile = true);
+    static bool Init(size_t capacity = 256, bool profile = true);
     static OpenThreadRef Create(const std::string& name);
-	static OpenThreadRef Create(const std::string& name, void (*cb)(const Msg&));
+    static OpenThreadRef Create(const std::string& name, void (*cb)(const Msg&));
     static OpenThreadRef Thread(int pid);
     static OpenThreadRef Thread(const std::string& name);
     static const std::string& ThreadName(int pid);
@@ -186,23 +232,11 @@ private:
         Node* next_;
         Node():id_(0), next_(0){}
     };
-    class SpinLock
-    {
-    private:
-        SpinLock(const SpinLock&) {};
-        void operator=(const SpinLock) {};
-    public:
-        SpinLock() {};
-        void lock() { while (flag_.test_and_set(std::memory_order_acquire)); }
-        void unlock() { flag_.clear(std::memory_order_release); }
-    private:
-        std::atomic_flag flag_;
-    };
     class SafeQueue
     {
         Node head_;
         Node* tail_;
-        SpinLock spinLock_;
+        OpenSpinLock spinLock_;
         unsigned int writeId_;
         unsigned int readId_;
         std::vector<Node*> vectCache_;
