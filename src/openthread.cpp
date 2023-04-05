@@ -1327,6 +1327,12 @@ bool OpenThreadWorker::send(std::vector<int>& vectPid, const std::shared_ptr<voi
     return OpenThread::Send(vectPid, data);
 }
 
+bool OpenThreadWorker::sendTranslate(int pid)
+{
+    if (!curMsg_) return false;
+    return OpenThread::Send(pid, curMsg_->data_);
+}
+
 bool OpenThreadWorker::sendLoop(const std::shared_ptr<void>& data)
 {
     if (!data)
@@ -1367,12 +1373,15 @@ void OpenThreadWorker::onMsg(OpenThreadMsg& msg)
 {
     const OpenThreadProto* proto = msg.data<OpenThreadProto>();
     if (!proto) return;
-    std::map<int, OpenThreadHandle>::iterator iter = mapHandle_.find(proto->protoType());
+    curMsg_ = &msg;
+    std::unordered_map<int, OpenThreadHandle>::iterator iter = mapHandle_.find(proto->protoType());
     if (iter != mapHandle_.end())
     {
         (this->*iter->second)(*proto);
+        curMsg_ = 0;
         return;
     }
+    curMsg_ = 0;
     assert(false);
 }
 

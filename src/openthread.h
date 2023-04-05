@@ -17,7 +17,7 @@
 #include <queue>
 #include <atomic>
 #include <assert.h>
-#include <map>
+#include <unordered_map>
 
 #if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
 #ifdef __cplusplus
@@ -68,16 +68,16 @@ namespace open
 
 #if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
 
-class OpenSpinLock
-{
-    std::atomic_flag flag_;
-    OpenSpinLock(const OpenSpinLock&) {};
-    void operator=(const OpenSpinLock) {};
-public:
-    OpenSpinLock() {};
-    inline void lock() { while (flag_.test_and_set(std::memory_order_acquire)); }
-    inline void unlock() { flag_.clear(std::memory_order_release); }
-};
+ class OpenSpinLock
+ {
+     std::atomic_flag flag_;
+     OpenSpinLock(const OpenSpinLock&) {};
+     void operator=(const OpenSpinLock) {};
+ public:
+     OpenSpinLock() {};
+     void lock() { while (flag_.test_and_set(std::memory_order_acquire)); }
+     void unlock() { flag_.clear(std::memory_order_release); }
+ };
 
 #else
 
@@ -138,12 +138,16 @@ public:
         inline const T* data() const { return dynamic_cast<const T*>((const T*)data_.get()); }
         template <class T>
         inline T* edit() const { return dynamic_cast<T*>((T*)data_.get()); }
+        //template <class T>
+        //inline std::shared_ptr<const T> dataSptr() const { return std::dynamic_pointer_cast<const T>(data_); }
+
         OpenThread& thread() const;
         const int pid() const;
         const std::string& name() const;
         template <class T>
         T* custom() const { return thread_ ? dynamic_cast<T*>((T*)thread_->custom_) : 0; }
         friend class OpenThread;
+        friend class OpenThreadWorker;
     };
     friend class Msg;
 
@@ -386,7 +390,7 @@ struct OpenThreadProto
     int srcPid_;
     std::string srcName_;
 
-    OpenThreadProto() :srcPid_(-1) {}
+    OpenThreadProto() : srcPid_(-1) {}
     virtual ~OpenThreadProto() {}
     int srcPid() { return srcPid_; }
     const std::string& srcName() { return srcName_; }
@@ -405,16 +409,17 @@ class OpenThreadWorker : public OpenThreader
 {
 public:
     OpenThreadWorker(const std::string& name)
-        :OpenThreader(name) {}
+        :OpenThreader(name), curMsg_(0){}
     virtual ~OpenThreadWorker() {}
 
     virtual bool send(int pid, const std::shared_ptr<void>& data);
     virtual bool send(std::vector<int>& vectPid, const std::shared_ptr<void>& data);
     virtual bool sendLoop(const std::shared_ptr<void>& data);
+    virtual bool sendTranslate(int pid);
     static bool Send(int pid, const std::shared_ptr<void>& data);
     void registers(int protoId, const OpenThreadHandle handle) 
     { 
-        std::map<int, OpenThreadHandle>::iterator iter = mapHandle_.find(protoId);
+        std::unordered_map<int, OpenThreadHandle>::iterator iter = mapHandle_.find(protoId);
         if (iter != mapHandle_.end())
         {
             assert(false);
@@ -430,7 +435,8 @@ protected:
     }
     virtual void onMsg(OpenThreadMsg& msg);
     
-    std::map<int, OpenThreadHandle> mapHandle_;
+    OpenThreadMsg* curMsg_;
+    std::unordered_map<int, OpenThreadHandle> mapHandle_;
 };
 
 
