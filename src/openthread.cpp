@@ -276,8 +276,9 @@ bool OpenThread::stop()
     msg.state_ = STOP;
     msg.thread_ = 0;
     queue_.push(node);
-    //if (isIdle_)
-    pthread_cond_signal(&cond_);
+    while (isIdle_) {
+        pthread_cond_signal(&cond_);
+    }
     return true;
 }
 
@@ -291,8 +292,9 @@ bool OpenThread::send(const std::shared_ptr<void>& data)
     msg.data_  = data;
     msg.thread_ = 0;
     queue_.push(node);
-    //if (isIdle_)
-    pthread_cond_signal(&cond_);
+    while (isIdle_) {
+        pthread_cond_signal(&cond_);
+    }
     return true;
 }
 
@@ -425,10 +427,13 @@ void OpenThread::run()
         }
         if (!isRunning) break;
 
-        isIdle_ = true;
         pthread_mutex_lock(&mutex_);
-        pthread_cond_wait(&cond_, &mutex_);
-        isIdle_ = false;
+        if (!hasMsg())
+        {
+            isIdle_ = true;
+            pthread_cond_wait(&cond_, &mutex_);
+            isIdle_ = false;
+        }
         pthread_mutex_unlock(&mutex_);
     }
     //printf("OpenThread[%s] exit\n", name_.c_str());
