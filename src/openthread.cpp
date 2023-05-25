@@ -428,12 +428,12 @@ void OpenThread::run()
         if (!isRunning) break;
 
         pthread_mutex_lock(&mutex_);
+        isIdle_ = true;
         if (!hasMsg())
         {
-            isIdle_ = true;
             pthread_cond_wait(&cond_, &mutex_);
-            isIdle_ = false;
         }
+        isIdle_ = false;
         pthread_mutex_unlock(&mutex_);
     }
     //printf("OpenThread[%s] exit\n", name_.c_str());
