@@ -163,6 +163,7 @@ OpenThread::OpenThread(const std::string& name)
     isIdle_ = false;
     custom_ = 0;
     memset(&threadId_, 0, sizeof(threadId_));
+    std::atomic_init(&msgCount_, 0);
 
     pthread_mutex_init(&mutex_, NULL);
     pthread_cond_init(&cond_, NULL);
@@ -181,6 +182,7 @@ OpenThread::OpenThread(const OpenThread&)
     isIdle_ = false;
     custom_ = 0;
     memset(&threadId_, 0, sizeof(threadId_));
+    std::atomic_init(&msgCount_, 0);
 
     pthread_mutex_init(&mutex_, NULL);
     pthread_cond_init(&cond_, NULL);
@@ -276,6 +278,7 @@ bool OpenThread::stop()
     msg.state_ = STOP;
     msg.thread_ = 0;
     queue_.push(node);
+    msgCount_++;
     while (isIdle_) {
         pthread_cond_signal(&cond_);
     }
@@ -292,6 +295,7 @@ bool OpenThread::send(const std::shared_ptr<void>& data)
     msg.data_  = data;
     msg.thread_ = 0;
     queue_.push(node);
+    msgCount_++;
     while (isIdle_) {
         pthread_cond_signal(&cond_);
     }
@@ -385,6 +389,7 @@ void OpenThread::run()
     {
         while ((node = popNode()))
         {
+            msgCount_--;
             if (node->msg_.state_ == STOP)
             {
                 node->msg_.thread_ = this;
@@ -427,9 +432,13 @@ void OpenThread::run()
         }
         if (!isRunning) break;
 
+        if (msgCount_ > 0)
+        {
+            continue;
+        }
         pthread_mutex_lock(&mutex_);
         isIdle_ = true;
-        if (!hasMsg())
+        if (!hasMsg() && msgCount_ == 0)
         {
             pthread_cond_wait(&cond_, &mutex_);
         }
