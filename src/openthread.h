@@ -228,6 +228,7 @@ private:
     size_t leftCount_;
     int64_t cpuCost_;
     int64_t cpuStart_;
+    std::atomic<int> msgCount_;
 private:
     struct Node
     {
@@ -368,7 +369,7 @@ class OpenThreader
 public:
     OpenThreader(const std::string& name) :name_(name), pid_(-1) {}
     virtual ~OpenThreader(){ stop(); }
-    virtual bool start();
+    bool start();
     virtual void stop();
     virtual void onStart() { }
     virtual void onMsg(OpenThreadMsg& msg) { }
