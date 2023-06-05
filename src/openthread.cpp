@@ -99,11 +99,10 @@ void OpenThread::SafeQueue::clear()
 
 void OpenThread::SafeQueue::popAll()
 {
-    //spinLock_.lock();
+    spinLock_.lock();
     Node* node = head_.next_;
     head_.next_ = 0;
     tail_ = &head_;
-    //spinLock_.unlock();
     if (node)
     {
         assert(vectCache_.empty());
@@ -116,6 +115,7 @@ void OpenThread::SafeQueue::popAll()
             node = tmpNode;
         }
     }
+    spinLock_.unlock();
 }
 
 void OpenThread::SafeQueue::popAll(std::queue<Node*>& queueCache)
